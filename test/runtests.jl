@@ -1,6 +1,5 @@
 using VulkanGen
 using Test
 
-@testset "VulkanGen.jl" begin
-    # Write your tests here.
-end
+include("naming_conventions.jl")
+include("signatures.jl")
