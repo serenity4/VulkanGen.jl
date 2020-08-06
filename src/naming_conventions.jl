@@ -55,33 +55,40 @@ is_snake_case(str) = lowercase(str) == str || uppercase(str) == str
 is_camel_case(str::NamingConvention) = is_camel_case(str.value)
 is_snake_case(str::NamingConvention) = is_snake_case(str.value)
 
-struct CodeConvention
-    structs::Type{<: NamingConvention}
-    functions::Type{<: NamingConvention}
-    constants::Type{<: NamingConvention}
-    variables::Type{<: NamingConvention}
-end
+const code_convention_names = [
+    :struct,
+    :function,
+    :variable,
+    :constant
+]
 
-const julia_convention = CodeConvention(CamelCaseUpper, SnakeCaseLower, SnakeCaseLower, SnakeCaseLower)
-const vulkan_convention = CodeConvention(CamelCaseUpper, CamelCaseLower, SnakeCaseUpper, SnakeCaseLower)
+code_convention(naming_convention_types...) = Dict(name => type for (name, type) in zip(code_convention_names, naming_convention_types))
+map_dicts(d1, d2) = Dict(key => obj1 => obj2 for (key, obj1, obj2) in zip(keys(d1), values(d1), values(d2)))
 
-function remove_parts(str::T, parts...) where T <: NamingConvention
+const julia_convention = code_convention(CamelCaseUpper, SnakeCaseLower, SnakeCaseLower, SnakeCaseLower)
+const vulkan_convention = code_convention(CamelCaseUpper, CamelCaseLower, CamelCaseLower, SnakeCaseUpper)
+
+const vulkan_to_julia = map_dicts(vulkan_convention, julia_convention)
+
+function remove_parts(str::T, parts) where T <: NamingConvention
     splitted_str = split(str)
     parts_to_keep = 1:length(splitted_str) |> x -> filter(y -> y ∉ parts, x) |> collect
     kept_parts = getindex.(Ref(splitted_str), parts_to_keep)
     T(kept_parts)
 end
 
-function enforce_convention(str, new_convention::CodeConvention, old_convention::CodeConvention, code_object; pickout_parts=nothing)
-    new_type = getproperty(new_convention, code_object)
-    str_nc = getproperty(old_convention, code_object)(str)
-    new_str = convert(new_type, str_nc).value
-    !isnothing(pickout_parts) ? remove_parts(new_str, pickout_parts) : new_str
+function enforce_convention(str, code_convention_mapping, code_object; pickout_parts=nothing)
+    old_t, new_t = code_convention_mapping[code_object]
+    new_str = convert(new_t, old_t(str))
+    (!isnothing(pickout_parts) ? remove_parts(new_str, pickout_parts) : new_str).value
 end
 
-function is_convention_respected(str, code_object, convention)
+enforce_convention(str, old_convention, new_convention, code_object; pickout_parts=nothing) = enforce_convention(str, map_dicts(old_convention, new_convention), code_object; pickout_parts)
+enforce_convention(str::Symbol, args...; kwargs...)::Symbol = Symbol(enforce_convention(String(str), args...; kwargs...))
+
+function is_code_convention_respected(str, code_object, code_convention)
     try
-        getproperty(convention, code_object)(str)
+        code_convention.conventions[code_object](str)
     catch e
         if typeof(e) != ErrorException
             throw(e)
@@ -99,13 +106,13 @@ function has_vk_prefix(name)
 end
 
 const vk_prefixes = Dict(
-    :structs => "Vk",
-    :functions => "vk",
-    :constants => "VK"
+    :struct => "Vk",
+    :function => "vk",
+    :constant => "VK"
 )
 
 function prefix_vk(name, code_object)
-    format = getproperty(vulkan_convention, code_object)
+    format = vulkan_convention.conventions[code_object]
     prefix(format(name), vk_prefixes[code_object]).value
 end
 
@@ -114,6 +121,10 @@ function prefix(name::T, prefix) where T <: NamingConvention
 end
 
 function remove_vk_prefix(name)
-    (startswith(name, "Vk") || startswith(name, "vk")) && name[3:end]
-    startswith(name, "VK_") && name[4:end]
+    (startswith(name, "Vk") || startswith(name, "vk")) && return name[3:end]
+    startswith(name, "VK_") && return name[4:end]
+    nothing
 end
+
+remove_vk_prefix(name, ::Type{CamelCase}) = name[3:end]
+remove_vk_prefix(name, ::Type{SnakeCase}) = name[4:end]

@@ -21,10 +21,10 @@ function writeout_cmd_funs(
     arg_names = Signature(cmd_fun)
 
     type_func_args = map(arg_names.names) do arg
-        enforce_convention(arg, julia_convention, vulkan_convention, :variables)
+        enforce_convention(arg, vulkan_to_julia, :variable)
         # arg == "command_buffer" && return "$(arg)::CommandBuffer"
     end
-    fun_name = enforce_convention(String(cmd_fun), julia_convention, vulkan_convention, :functions, pickout_parts=[1, 2])
+    fun_name = enforce_convention(String(cmd_fun), vulkan_to_julia, :function, pickout_parts=[1, 2])
     expr = """
 \"\"\"
 Julian function for `$cmd_fun`.

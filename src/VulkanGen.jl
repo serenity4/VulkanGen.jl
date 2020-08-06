@@ -1,5 +1,6 @@
 module VulkanGen
 
+using Pipe, Transducers
 using VulkanCore.vk
 using VulkanCore:vk
 
