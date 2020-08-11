@@ -29,7 +29,6 @@ end
 
 @generated function unsafe_pointer(obj)
     quote
-        typeof(obj) <: Union{Base.RefValue,Base.AbstractArray}
         Base.unsafe_convert(Ptr{typeof(obj[])}, obj)
     end
 end
@@ -56,5 +55,5 @@ function destroy_handle(f, device)
     end
 end
 
-int_to_str(field) = String(filter(x->x != 0, UInt8[field...]))
+int_to_str(field) = String(filter(x -> x != 0, UInt8[field...]))
 reverse_dict(d::Dict) = Dict(v => k for (k, v) in d)

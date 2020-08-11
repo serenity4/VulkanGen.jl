@@ -4,6 +4,9 @@ authors = ["Cédric BELMANT"]
 version = "0.1.0"
 
 [deps]
+DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
+JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
+Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Pipe = "b98c9c47-44ae-5843-9183-064241ee97a0"
 Transducers = "28d57a85-8fef-5791-bfe6-a80928e7c999"
 VulkanCore = "16167f82-ea26-5cba-b1de-ed6fd5e30a11"

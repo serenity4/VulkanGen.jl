@@ -94,7 +94,7 @@ function generate_helper(; dest="../generated")
         println(io, """
 using Vulkan
 
-include("calls.jl")
+include("vk_utils.jl")
 
     """)
         for elem in create_info_types
