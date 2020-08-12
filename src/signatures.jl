@@ -58,6 +58,6 @@ typed_field(symbol, type) = isnothing(type) ? String(symbol) : join([symbol, typ
 
 Base.join(args::Argument...) = join(map(typed_field, getproperty.(args, :symbol), getproperty.(args, :type)), ", ")
 Base.join(args::KeywordArgument...) = join(map((x, y) -> join([x, y], "="), getproperty.(args, :symbol), getproperty.(args, :default)), ", ")
-Base.show(io::IO, sig::Signature) = print(io, sig.symbol, "(", join(sig.args...), "; ", join(sig.kwargs...), ")")
+Base.show(io::IO, sig::Signature) = print(io, sig.symbol, "(", join(sig.args...), isempty(sig.kwargs) ? "" : ("; " * join(sig.kwargs...)), ")")
 
-generate(sig::Signature) = join([sig.symbol, "(", join(sig.args...), isempty(sig.kwargs) ? "" : "; " * join(sig.kwargs...), ")"])
+generate(sig::Signature) = join([sig.symbol, "(", join(sig.args...), isempty(sig.kwargs) ? "" : ("; " * join(sig.kwargs...)), ")"])

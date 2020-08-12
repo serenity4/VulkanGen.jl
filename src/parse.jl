@@ -1,4 +1,4 @@
-struct ParsedFile
+struct API
     source
     structs::OrderedDict
     funcs::OrderedDict
@@ -7,11 +7,14 @@ struct ParsedFile
     eval
 end
 
-ParsedFile(source, structs, funcs, consts, enums) = ParsedFile(source, structs, funcs, consts, enums, nothing)
+API(source, structs, funcs, consts, enums) = API(source, structs, funcs, consts, enums, nothing)
 
-Base.show(io::IO, pf::ParsedFile) = print(io, "ParsedFile with $(length(pf.structs)) structs, $(length(pf.funcs)) functions and $(length(pf.consts) + length(pf.enums)) globals from $(pf.source)")
+extract_fields(apis, sym) = OrderedDict(vcat(collect.(getproperty.(apis, sym))...))
+merge(apis::API...) = API(getproperty.(apis, :source), extract_fields.(Ref(apis), [:structs, :funcs, :consts, :enums])..., nothing)
 
-OrderedDict(defs::AbstractArray{T}) where {T <: Declaration} = OrderedDict{Symbol,T}(map(x -> x.name => x, defs))
+API(files::AbstractArray{<: AbstractString}) = merge(API.(files)...)
+
+Base.show(io::IO, pf::API) = print(io, "API with $(length(pf.structs)) structs, $(length(pf.funcs)) functions, $(length(pf.consts)) consts and $(length(pf.enums)) enums from $(pf.source)")
 
 function definition_begins(line, ::Type{FDefinition})
     !isnothing(match(r"\w+\(.*\)\s+=(?!=)", line)) || !isnothing(match(r"^function ", line))
@@ -60,10 +63,10 @@ function parse_for_definition(file, ::Type{T}) where {T <: Declaration}
     defs
 end
 
-function ParsedFile(file)
+function API(file)
     defs = []
     for decl ∈ [SDefinition, FDefinition, CDefinition, EDefinition]
         push!(defs, parse_for_definition(file, decl))
     end
-    ParsedFile(file, OrderedDict.(defs)...)
+    API(file, OrderedDict.(defs)...)
 end

@@ -1,6 +1,8 @@
 using VulkanGen
 
-api = ParsedFile(dirname(pathof(VulkanCore)) * "/../gen/vk_common.jl")
+getfile(name) = dirname(dirname(pathof(VulkanCore))) *  "/gen/" * name
+files = getfile.(["vk_common.jl", "vk_api.jl"])
+api = API(files)
 api.eval(sym) = @eval(vk, $(Meta.parse("$sym")))
 
 function wrap_vulkan_api(api)
@@ -56,31 +58,25 @@ function wrap_vulkan_api(api)
         name_str = "$name"
         if startswith(name_str, "pfn")
             cc = CamelCaseUpper(name_str[4:end])
-        elseif !isnothing(match(r"^p+[A-Z]", x))
+        elseif !isnothing(match(r"^p+[A-Z]", name_str))
             cc = CamelCaseUpper(lstrip(name_str, 'p'))
         else
             cc = detect_convention(name_str)(name_str)
         end
-        Symbol(convert(julia_convention[:variable], cc).value)
-    end
-
-    function convert_ctype_to_julia(type)
-        
-        new_type
+        Symbol(convert(VulkanGen.julia_convention[:variable], cc).value)
     end
 
     function process_type(type)
-        new_type = convert_ctype_to_julia(type)
-        Symbol(replace("$new_type", "Vk" => ""))
+        Symbol(replace("$type", "Vk" => ""))
     end
 
-    function process_field(name, type)
+    function field_transform(name, type)
         process_name(name) => process_type(type)
     end
 
-    process_field(name) = process_name(name)
+    field_transform(name) = process_name(name)
 
-    struct_wrapper = StructWrapper(keep_field_f=x -> x ∉ dropped_fields, is_mutable_f=hasfinalizer)
+    struct_wrapper = StructWrapper(; keep_field_f=(x, y) -> x ∉ dropped_fields, is_mutable_f=hasfinalizer, name_transform=x -> Symbol("$(x.name)"[3:end]), field_transform)
     func_wrapper = FuncWrapper(keep_arg=x -> isnothing(match(r"^p+[A-Z]", x)))
     const_wrapper = ConstWrapper()
 

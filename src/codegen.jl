@@ -39,6 +39,8 @@ end
     enum_macro::Symbol = sym"@enum"
 end
 
+OrderedDict(defs::AbstractArray{T}) where {T <: Declaration} = OrderedDict{Symbol,T}(map(x -> x.name => x, defs))
+
 EDefinition(name, fields, with_begin_block) = EDefinition(name, fields, with_begin_block, nothing, sym"@enum")
 
 generate(cdef::CDefinition) = format_text("const $(cdef.name) = $(cdef.value)")
@@ -96,9 +98,9 @@ function EDefinition(str::AbstractString)
     enum_macro, id = Symbol.(split_str[1:2])
     split_id = split("$id", "::")
     id, type = Symbol(first(split_id)), length(split_id) == 1 ? nothing : Symbol(last(split_id))
-    split_str = splitstrip(str, delim="\n")
-    with_begin_block = last(split(split_str[1], " ")) == "begin"
-    values = with_begin_block ? split(replace(join(split_str[2:end - 1], "\n"), "\n" => " "), " ") : strip.(splitjoin(str, [1, 2], delim=" "))
+    split_str_n = splitstrip(str, delim="\n")
+    with_begin_block = last(split(split_str_n[1], " ")) == "begin"
+    values = with_begin_block ? strip.(split(join(split_str_n[2:end - 1], "\n"), "\n")) : strip.(splitjoin(str, [1, 2], delim=" "))
     EDefinition(id, values, with_begin_block, type, enum_macro)
 end
 

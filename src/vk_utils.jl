@@ -34,7 +34,7 @@ end
 end
 
 function vk_version(version::VersionNumber)
-    VK_MAKE_VERSION(getfield.(Ref(version), [:major, :minor, :patch])...)
+    VK_MAKE_VERSION(getproperty.(Ref(version), [:major, :minor, :patch])...)
 end
 
 int_to_version(version::Cuint) = VersionNumber(VK_VERSION_MAJOR(version),

@@ -1,4 +1,4 @@
-pf = ParsedFile(joinpath(@__DIR__, "resources", "defs.jl"))
+pf = API(joinpath(@__DIR__, "resources", "defs.jl"))
 
 # println(pf.structs)
 # println(pf.funcs)
@@ -16,6 +16,7 @@ f2 = FDefinition(:g, Signature(:g, [PositionalArgument(:x, nothing)], []), true,
 c1 = CDefinition(:myconst, 50)
 
 e1 = EDefinition(:my_enum, [:a, :b, :c, :d, :e, :f], false)
+e2 = EDefinition(:my_other_enum, Symbol.(["a = 3", "b = 2", "c=200"]), true)
 
 
 
@@ -27,6 +28,7 @@ e1 = EDefinition(:my_enum, [:a, :b, :c, :d, :e, :f], false)
         @test generate(pf.funcs[:g]) == generate(f2)
         @test generate(pf.consts[:myconst]) == generate(c1)
         @test generate(pf.enums[:my_enum]) == generate(e1)
+        @test generate(pf.enums[:my_other_enum]) == generate(e2)
     end
     # @testset "Declaration generation interoperability" begin
         

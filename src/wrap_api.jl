@@ -6,8 +6,15 @@ mutable struct WrappedAPI
     enums
 end
 
+# not efficient
+vars(w_api) = OrderedDict([Pair(k, v) for field ∈ getproperty.(Ref(w_api), [:structs, :funcs, :consts, :enums]) for (k, v) ∈ field])
+
+Base.show(io::IO, w_api::WrappedAPI) = print(io, "Wrapped API with $(length(w_api.structs)) structs, $(length(w_api.funcs)) functions, $(length(w_api.consts)) consts and $(length(w_api.enums)) enums wrapped from $(w_api.source)")
+
 abstract type Wrapper end
 
+field_transform_default(name) = name
+field_transform_default(name, type) = name => type
 
 const default_filenames = Dict(
     SDefinition => "structs.jl",
@@ -38,8 +45,8 @@ end
     structs::AbstractArray{SDefinition} = SDefinition[]
     constructors::AbstractArray{FDefinition} = FDefinition[]
     keep_field_f = (x, y) -> true # function which operates on name, type args for each struct field, returns a Bool
-    field_transform = (x, y) -> x => y # function which operates on a name, type args for each struct field, returns a name => type pair or nothing
-    name_transform = x -> x
+    field_transform = field_transform_default # function which operates on a name, type args for each struct field, returns a name => type pair or nothing
+    name_transform = x -> x.name
     is_mutable_f = x -> false
 end
 
@@ -60,61 +67,67 @@ function remove_shape_info(sym)
     list[1]
 end
 
-function type_dependencies(type::Symbol)
-    eachmatch(r"{(.*)}", "$type ") |> Map(x -> getproperty(x, :captures)[1]) |> Map(x -> remove_lib_prefix(sym"$x")) |> Map(remove_shape_info) |> Map(strip) |> Map(Symbol) |> collect
+remove_lib_prefix(sym, lib_prefix) = isnothing(lib_prefix) ? sym : Symbol(replace(String(sym), lib_prefix * "." => ""))
+
+function type_dependencies(type::Symbol, lib_prefix)
+    eachmatch(r"{(.*)}", "$type ") |> Map(x -> getproperty(x, :captures)[1]) |> Map(x -> remove_lib_prefix(sym"$x", lib_prefix)) |> Map(remove_shape_info) |> Map(strip) |> Map(Symbol) |> collect
 end
 
 is_opaque_ptr(ptr) = ptr == Ptr{Nothing}
 
-function wrap_api(api::ParsedFile; is_mutable=x -> false, lib_prefix=nothing, parameters=[], spliced_args=[], type_conversions=[], struct_wrapper=StructWrapper(), func_wrapper=FuncWrapper(), const_wrapper=ConstWrapper())
+function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameters=[], spliced_args=[], type_conversions=Dict(), struct_wrapper=StructWrapper(), func_wrapper=FuncWrapper(), const_wrapper=ConstWrapper(), wrapped_api= nothing)
 
-    w_api = WrappedAPI(api.source, SDefinition[], FDefinition[], CDefinition[], EDefinition[])
+    w_api = isnothing(wrapped_api) ? WrappedAPI(api.source, SDefinition[], FDefinition[], CDefinition[], EDefinition[]) : wrapped_api
     
-    isknown(type) = type ∈ keys(type_conversions) || all(subtype ≠ type && subtype ∈ keys(type_conversions) for subtype ∈ type_dependencies(type))
+    function isknown(type)
+        type ∈ keys(type_conversions) && return true
+        subtypes = filter(x -> x != type, type_dependencies(type, lib_prefix))
+        !isempty(subtypes) && all(isknown(subtype) for subtype ∈ subtypes)
+    end
     isknown(sdef::SDefinition) = isknown(sdef.name)
 
     function is_struct(sym)
         sym_eval = api.eval(sym)
         !(sym_eval <: Tuple) && isstructtype(sym_eval)
     end
-    remove_lib_prefix(sym) = isnothing(lib_prefix) ? sym : Symbol(replace(String(sym), lib_prefix * "." => ""))
+
 
     function fetch_known_type(type)
-        type ∈ type_conversions[type] && return type
-        for t ∈ type_dependencies(type)
+        type ∈ keys(type_conversions) && return type_conversions[type]
+        new_type = type
+        for t ∈ type_dependencies(type, lib_prefix)
             new_type = Symbol(replace(String(new_type), "$t" => "$(type_conversions[t])"))
         end
-        new_type
     end
 
     function wrap_field_transform(struct_wrapper, name, type)
         type = isknown(type) ? struct_wrapper.field_transform(name) => fetch_known_type(type) : struct_wrapper.field_transform(name, type)
     end
 
-    function wrap_type!(struct_wrapper, def)
+    function wrap!(struct_wrapper::StructWrapper, def::SDefinition)
         if is_opaque_ptr(api.eval(def.name))
             new_def = parse_ptr(def)
         elseif is_struct(def.name)
             new_def = wrap_struct!(struct_wrapper, def)
         end
         if def.name ∉ keys(type_conversions)
-            push!(w_api.structs, new_def) # add to wrapped structs
+            push!(struct_wrapper.structs, new_def) # add to wrapped structs
             type_conversions[def.name] = new_def.name # add as a conversion from its name
         else
             @warn "Parsed type $(def.name) but was already processed"
         end
     end
 
-    function wrap_struct!(struct_wrapper, sdef)
+    function wrap_struct!(struct_wrapper::StructWrapper, sdef)
         new_fields = OrderedDict()
         for (name, type) ∈ sdef.fields
             if !struct_wrapper.keep_field_f(name, type)
                 continue
             end
             if !isknown(type)
-                for t ∈ type_dependencies(type) # also includes original type
+                for t ∈ type_dependencies(type, lib_prefix) # also includes original type
                     if t != sdef.name && t ∈ keys(api.structs) && t ∉ keys(type_conversions) # avoid recursive struct field definitions, do not parse non-API types and do not rewrap a wrapped type
-                        wrap_type!(api.structs[t])
+                        wrap!(struct_wrapper, api.structs[t])
                     end
                 end
             end
@@ -123,7 +136,8 @@ function wrap_api(api::ParsedFile; is_mutable=x -> false, lib_prefix=nothing, pa
                 new_fields[f.first] = f.second
             end
         end
-        SDefinition(struct_wrapper.name_transform(base), struct_wrapper.is_mutable_f(base), new_fields)
+        new_name = struct_wrapper.name_transform(sdef)
+        SDefinition(new_name, struct_wrapper.is_mutable_f(new_name), new_fields)
     end
 
     function parse_ptr(sym)
@@ -132,30 +146,26 @@ function wrap_api(api::ParsedFile; is_mutable=x -> false, lib_prefix=nothing, pa
         SDefinition(base, is_mutable(base), OrderedDict(:handle => Ptr{Nothing}, :deps => nothing))
     end
 
-    function wrap_structs!(struct_wrapper, errors)
-        for s ∈ values(api.structs)
-            if !isknown(s)
+    function wrap!(wrapper::Wrapper, objects, errors)
+        for obj ∈ objects
+            if !isknown(obj)
                 try
-                    wrap_type!(struct_wrapper, s)
+                    wrap!(wrapper, obj)
                 catch e
                     msg = hasproperty(e, :msg) ? e.msg : "$(typeof(e))"
                     errors[s.name] = msg
                     println("\e[31;1;1m$(s.name): $msg\e[m")
-                    # rethrow(e)
-                    typeof(e) == ErrorException ? continue : rethrow(e)
+                    rethrow(e)
+                    # typeof(e) == ErrorException ? continue : rethrow(e)
                 end
             end
         end
-
-    end
-
-    function wrap_functions!(fdefs, errors)
     end
 
     function wrap!(w_api)
         errors = OrderedDict()
-        wrap_structs!(struct_wrapper, errors)
-        wrap_functions!(api.funcs, errors)
+        wrap!(struct_wrapper, values(api.structs), errors)
+        # wrap!(func_wrapper, values(api.funcs), errors)
         length(errors) == 0 ? @info("API successfully wrapped.") : @warn("API wrapped with $(length(errors)) errors:")
         for (field, msg) ∈ errors
             println("\t\e[31;1;1m$field: $msg\e[m")
