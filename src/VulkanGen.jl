@@ -47,6 +47,7 @@ PositionalArgument,
 KeywordArgument,
 StructWrapper,
 ConstWrapper,
-FuncWrapper
+FuncWrapper,
+vk_structure_constant
 
 end

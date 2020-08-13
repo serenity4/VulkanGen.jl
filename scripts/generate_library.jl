@@ -8,17 +8,19 @@ api.eval(sym) = @eval(vk, $(Meta.parse("$sym")))
 function wrap_vulkan_api(api)
     
     # parameters to keep in a constructor rather than in a struct
-    parameters = [
-        :pNext,
-        :flags,
-        :pAllocator
-    ]
+    parameters = Dict(
+        :pNext => KeywordArgument(:next, sym"()"),
+        :flags => KeywordArgument(:flags, sym"0"),
+        :pAllocator => KeywordArgument(:allocator, sym"()"),
+    )
 
-    # arguments with a unique possible value
-    # they are dropped as argument and replaced wherever necessary by this unique possible value
-    spliced_args = [
-        :sType,
-    ]
+    stype_splice(fdef) = vk_structure_constant(fdef.name)
+
+    # arguments whose value is always predetermined by the function signature
+    # they are dropped as argument and replaced wherever necessary
+    spliced_args = Dict(
+        :sType => stype_splice,
+    )
 
     # type => new_type
     type_conversions = Dict(
@@ -51,14 +53,13 @@ function wrap_vulkan_api(api)
         hasproperty(vk, Symbol("vkDestroy$vk_type"))
     end
 
-    dropped_fields = [parameters..., spliced_args...]
+    dropped_fields = collect(Iterators.flatten((keys(parameters), keys(spliced_args))))
+    println(dropped_fields)
 
     function process_name(name)
         name ∈ keys(convention_exceptions) && return convention_exceptions[name]
         name_str = "$name"
-        if startswith(name_str, "pfn")
-            cc = CamelCaseUpper(name_str[4:end])
-        elseif !isnothing(match(r"^p+[A-Z]", name_str))
+        if !isnothing(match(r"^p+[A-Z]", name_str))
             cc = CamelCaseUpper(lstrip(name_str, 'p'))
         else
             cc = detect_convention(name_str)(name_str)
@@ -71,12 +72,13 @@ function wrap_vulkan_api(api)
     end
 
     function field_transform(name, type)
+        startswith("$name", "pfn") && return Symbol(convert(SnakeCaseLower, CamelCaseUpper("$name"[4:end])).value) => :Function
         process_name(name) => process_type(type)
     end
 
     field_transform(name) = process_name(name)
 
-    struct_wrapper = StructWrapper(; keep_field_f=(x, y) -> x ∉ dropped_fields, is_mutable_f=hasfinalizer, name_transform=x -> Symbol("$(x.name)"[3:end]), field_transform)
+    struct_wrapper = StructWrapper(; discard_field=(x, y) -> x ∈ dropped_fields, is_mutable_f=hasfinalizer, name_transform=x -> Symbol("$(x.name)"[3:end]), field_transform)
     func_wrapper = FuncWrapper(keep_arg=x -> isnothing(match(r"^p+[A-Z]", x)))
     const_wrapper = ConstWrapper()
 

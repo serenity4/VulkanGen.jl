@@ -16,27 +16,28 @@ abstract type Wrapper end
 field_transform_default(name) = name
 field_transform_default(name, type) = name => type
 
-const default_filenames = Dict(
-    SDefinition => "structs.jl",
-    FDefinition => "functions.jl",
-    CDefinition => "globals.jl",
-    EDefinition => "globals.jl",
-)
+default_filename(::Type{SDefinition}) = "structs.jl"
+default_filename(::Type{FDefinition}) = "functions.jl"
+default_filename(::Type{CDefinition}) = "globals.jl"
+default_filename(::Type{EDefinition}) = "globals.jl"
 
-const default_spacings = Dict(
-    SDefinition => "\n" ^ 2,
-    FDefinition => "\n" ^ 2,
-    CDefinition => "\n",
-    EDefinition => "\n",
-)
-    
-Base.write(io::IO, defs::AbstractArray{T}; spacings=default_spacings) where {T<: Declaration} =  write.(Ref(io), join(generate.(defs), spacings[T]))
+default_spacing(::SDefinition) = "\n"^2
+default_spacing(decl::FDefinition) = decl.short ? "\n" : "\n"^2
+default_spacing(::CDefinition) = "\n"
+default_spacing(::EDefinition) = "\n"
 
-function Base.write(w_api::WrappedAPI, dest_dir; spacings=default_spacings, filenames=default_filenames)
+Base.write(io::IO, defs::AbstractArray{T}; spacing=default_spacing) where {T<: Declaration} =  write.(Ref(io), join(Iterators.flatten(zip(generate.(defs), spacing.(defs)))))
+
+"""Write a wrapped API to files in dest_dir.
+
+Spacing options can be controlled by providing the corresponding argument with a function.
+Files that are written to can be controlled by providing the filename argument with a function.
+"""
+function Base.write(w_api::WrappedAPI, dest_dir; spacing=default_spacing, filename=default_filename)
     for defs ∈ collect.(values.([w_api.consts, w_api.enums, w_api.structs, w_api.funcs]))
-        dest = filenames[eltype(defs)]
+        dest = filename(eltype(defs))
         open(joinpath(dest_dir, dest), "w+") do io
-            write(io, defs; spacings)
+            write(io, defs; spacing)
         end
     end
 end
@@ -44,7 +45,7 @@ end
 @with_kw mutable struct StructWrapper <: Wrapper
     structs::AbstractArray{SDefinition} = SDefinition[]
     constructors::AbstractArray{FDefinition} = FDefinition[]
-    keep_field_f = (x, y) -> true # function which operates on name, type args for each struct field, returns a Bool
+    discard_field = (x, y) -> true # function which operates on name, type args for each struct field, returns a Bool
     field_transform = field_transform_default # function which operates on a name, type args for each struct field, returns a name => type pair or nothing
     name_transform = x -> x.name
     is_mutable_f = x -> false
@@ -75,7 +76,7 @@ end
 
 is_opaque_ptr(ptr) = ptr == Ptr{Nothing}
 
-function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameters=[], spliced_args=[], type_conversions=Dict(), struct_wrapper=StructWrapper(), func_wrapper=FuncWrapper(), const_wrapper=ConstWrapper(), wrapped_api= nothing)
+function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameters=Dict(), spliced_args=Dict(), type_conversions=Dict(), struct_wrapper=StructWrapper(), func_wrapper=FuncWrapper(), const_wrapper=ConstWrapper(), wrapped_api = nothing)
 
     w_api = isnothing(wrapped_api) ? WrappedAPI(api.source, SDefinition[], FDefinition[], CDefinition[], EDefinition[]) : wrapped_api
     
@@ -104,24 +105,15 @@ function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameter
         type = isknown(type) ? struct_wrapper.field_transform(name) => fetch_known_type(type) : struct_wrapper.field_transform(name, type)
     end
 
-    function wrap!(struct_wrapper::StructWrapper, def::SDefinition)
-        if is_opaque_ptr(api.eval(def.name))
-            new_def = parse_ptr(def)
-        elseif is_struct(def.name)
-            new_def = wrap_struct!(struct_wrapper, def)
-        end
-        if def.name ∉ keys(type_conversions)
-            push!(struct_wrapper.structs, new_def) # add to wrapped structs
-            type_conversions[def.name] = new_def.name # add as a conversion from its name
-        else
-            @warn "Parsed type $(def.name) but was already processed"
-        end
+    function wrap!(struct_wrapper::StructWrapper, sdef::SDefinition)
+        new_sdef = wrap_struct!(struct_wrapper, sdef)
+        wrap_constructor!(struct_wrapper, new_sdef, sdef)
     end
 
     function wrap_struct!(struct_wrapper::StructWrapper, sdef)
         new_fields = OrderedDict()
         for (name, type) ∈ sdef.fields
-            if !struct_wrapper.keep_field_f(name, type)
+            if struct_wrapper.discard_field(name, type)
                 continue
             end
             if !isknown(type)
@@ -137,7 +129,34 @@ function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameter
             end
         end
         new_name = struct_wrapper.name_transform(sdef)
-        SDefinition(new_name, struct_wrapper.is_mutable_f(new_name), new_fields)
+        new_sdef = SDefinition(new_name, struct_wrapper.is_mutable_f(new_name), new_fields)
+        if sdef.name ∉ keys(type_conversions)
+            push!(struct_wrapper.structs, new_sdef) # add to wrapped structs
+            type_conversions[sdef.name] = new_sdef.name # add as a conversion from its name
+        else
+            @warn "Parsed type $(sdef.name) but was already processed"
+        end
+        new_sdef
+    end
+
+    function parameters_from_fields(sdef)
+        names = collect(keys(sdef.fields))
+        kwarg_names = filter(x -> x ∈ keys(parameters), names)
+        kwargs = map(x -> getindex(parameters, x), kwarg_names)
+
+        kwargs
+    end
+
+    arguments_from_fields(sdef) = PositionalArgument.(collect(keys((sdef.fields))))
+
+    function wrap_constructor!(struct_wrapper, new_sdef, sdef)
+        fname = new_sdef.name
+        kwargs = parameters_from_fields(sdef)
+        args = arguments_from_fields(new_sdef)
+        sig = Signature(fname, args, kwargs)
+        body = []
+        co = FDefinition(fname, sig, length(body) == 1, body)
+        push!(struct_wrapper.constructors, co)
     end
 
     function parse_ptr(sym)
@@ -153,8 +172,8 @@ function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameter
                     wrap!(wrapper, obj)
                 catch e
                     msg = hasproperty(e, :msg) ? e.msg : "$(typeof(e))"
-                    errors[s.name] = msg
-                    println("\e[31;1;1m$(s.name): $msg\e[m")
+                    errors[obj.name] = msg
+                    println("\e[31;1;1m$(obj.name): $msg\e[m")
                     rethrow(e)
                     # typeof(e) == ErrorException ? continue : rethrow(e)
                 end

@@ -1,4 +1,4 @@
-struct API
+mutable struct API
     source
     structs::OrderedDict
     funcs::OrderedDict
@@ -13,8 +13,8 @@ extract_fields(apis, sym) = OrderedDict(vcat(collect.(getproperty.(apis, sym))..
 merge(apis::API...) = API(getproperty.(apis, :source), extract_fields.(Ref(apis), [:structs, :funcs, :consts, :enums])..., nothing)
 
 API(files::AbstractArray{<: AbstractString}) = merge(API.(files)...)
-
 Base.show(io::IO, pf::API) = print(io, "API with $(length(pf.structs)) structs, $(length(pf.funcs)) functions, $(length(pf.consts)) consts and $(length(pf.enums)) enums from $(pf.source)")
+
 
 function definition_begins(line, ::Type{FDefinition})
     !isnothing(match(r"\w+\(.*\)\s+=(?!=)", line)) || !isnothing(match(r"^function ", line))
