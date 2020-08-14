@@ -127,6 +127,16 @@ function check(statements::AbstractArray{Statement}, init_ids)
     end
 end
 
+function generate(statements::AbstractArray{Statement}; init_ids=[], check_identifiers=true)
+    isempty(statements) && return ""
+    if check_identifiers
+        check(statements, init_ids)
+    end
+    format_text(join(getproperty.(statements, :body), "\n"))
+end
+
+generate(statements::AbstractArray{Statement}, sig::Signature) = generate(statements; init_ids=argnames(sig))
+
 function generate(s::SDefinition)
     def = (s.is_mutable ? "mutable " : "") * "struct $(s.name)"
     fields = join(typed_field.(keys(s.fields), values(s.fields)), "\n")
@@ -142,13 +152,3 @@ function generate(f::FDefinition; check_body=true)
     end
     format_text(str)
 end
-
-function generate(statements::AbstractArray{Statement}; init_ids=[], check_identifiers=true)
-    isempty(statements) && return ""
-    if check_identifiers
-        check(statements, init_ids)
-    end
-    format_text(join(getproperty.(statements, :body), "\n"))
-end
-
-generate(statements::AbstractArray{Statement}, sig::Signature) = generate(statements; init_ids=argnames(sig))

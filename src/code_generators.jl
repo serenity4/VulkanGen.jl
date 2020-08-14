@@ -128,17 +128,6 @@ function wrap!(varnames, arg::PointerArgument; deps_variable="deps", suffix="_re
     push!(deps, $(varname)_ref)"""
 end
 
-function construction(sd::StructDetails)
-    vk_fields = fieldnames(sd.vt_eval)
-    parameters = vk_fields |> Filter(x -> x ∈ keys(wrapped_parameters)) |> Map(x -> wrapped_parameters[x]) |> collect
-    def_args = splice.(filter(isarg, parameters))
-    def_kwargs = splice.(filter(iskwarg, parameters))
-    vt_base_jl = enforce_convention(Symbol(sd.vt_base), vulkan_to_julia, :struct)
-    def = "function $vt_base_jl($(join_args(def_args)); $(join_args(def_kwargs)))"
-
-    def
-end
-
 function wrap!(varnames, f::Finalization)
     vk_finalizer_sym = first(match(Finalizer(), Symbol(f.vt_base), max_matches=1))
     vk_finalizer = first(methods(getproperty(vk, vk_finalizer_sym)))

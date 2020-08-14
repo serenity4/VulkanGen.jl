@@ -22,6 +22,13 @@ function wrap_vulkan_api(api)
         :sType => stype_splice,
     )
 
+    create_fun_to_types_exceptions = Dict(
+    "GraphicsPipelines" => "Pipeline"
+    )
+
+    types_to_create_info_exceptions = Dict(
+    "Queue" => "DeviceQueue"
+    )
     # type => new_type
     type_conversions = Dict(
         :Cstring => :Cstring,
@@ -54,9 +61,8 @@ function wrap_vulkan_api(api)
     end
 
     dropped_fields = collect(Iterators.flatten((keys(parameters), keys(spliced_args))))
-    println(dropped_fields)
 
-    function process_name(name)
+    function field_transform(name)
         name ∈ keys(convention_exceptions) && return convention_exceptions[name]
         name_str = "$name"
         if !isnothing(match(r"^p+[A-Z]", name_str))
@@ -73,12 +79,18 @@ function wrap_vulkan_api(api)
 
     function field_transform(name, type)
         startswith("$name", "pfn") && return Symbol(convert(SnakeCaseLower, CamelCaseUpper("$name"[4:end])).value) => :Function
-        process_name(name) => process_type(type)
+        field_transform(name) => process_type(type)
     end
 
-    field_transform(name) = process_name(name)
+    function constructor_body(new_sdef::SDefinition, args, kwargs)
+        body = Statement[]
+        if :pNext ∈ getproperty.(args, :symbol)
+        end
 
-    struct_wrapper = StructWrapper(; discard_field=(x, y) -> x ∈ dropped_fields, is_mutable_f=hasfinalizer, name_transform=x -> Symbol("$(x.name)"[3:end]), field_transform)
+        body
+    end
+
+    struct_wrapper = StructWrapper(; discard_field=(x, y) -> x ∈ dropped_fields, is_mutable_f=hasfinalizer, name_transform=x -> Symbol("$(x.name)"[3:end]), field_transform, constructor_body)
     func_wrapper = FuncWrapper(keep_arg=x -> isnothing(match(r"^p+[A-Z]", x)))
     const_wrapper = ConstWrapper()
 

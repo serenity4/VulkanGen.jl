@@ -49,6 +49,7 @@ end
     field_transform = field_transform_default # function which operates on a name, type args for each struct field, returns a name => type pair or nothing
     name_transform = x -> x.name
     is_mutable_f = x -> false
+    constructor_body = (x, y, z) -> Statement[]
 end
 
 @with_kw mutable struct FuncWrapper <: Wrapper
@@ -154,7 +155,7 @@ function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameter
         kwargs = parameters_from_fields(sdef)
         args = arguments_from_fields(new_sdef)
         sig = Signature(fname, args, kwargs)
-        body = []
+        body = struct_wrapper.constructor_body(new_sdef, args, kwargs)
         co = FDefinition(fname, sig, length(body) == 1, body)
         push!(struct_wrapper.constructors, co)
     end
