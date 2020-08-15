@@ -90,12 +90,34 @@ function wrap_vulkan_api(api)
         body
     end
 
+    function arg_transform(decl, arg)
+        PositionalArgument(Symbol(convert(SnakeCaseLower, "$(arg.symbol)").value), arg.type)
+    end
+
+    function kwarg_transform(decl, arg)
+        KeywordArgument(Symbol(convert(SnakeCaseLower, "$(kwarg.symbol)").value), kwarg.default)
+    end
+
+    function name_transform(decl)
+        Symbol(convert(SnakeCaseLower, decl.name).value)
+    end
+
     struct_wrapper = StructWrapper(; discard_field=(x, y) -> x ∈ dropped_fields, is_mutable_f=hasfinalizer, name_transform=x -> Symbol("$(x.name)"[3:end]), field_transform, constructor_body)
-    func_wrapper = FuncWrapper(keep_arg=x -> isnothing(match(r"^p+[A-Z]", x)))
+    func_wrapper = FuncWrapper(; arg_transform, kwarg_transform, name_transform)
     const_wrapper = ConstWrapper()
 
     wrap_api(api; is_mutable=hasfinalizer, lib_prefix="VulkanCore.LibVulkan", spliced_args, type_conversions, parameters, const_wrapper, func_wrapper, struct_wrapper)
 end
 
+function print_statements(decl)
+    println("Printing statements for \e[34;1;1m$decl\e[m")
+    pats = patterns(decl)
+    println(generate(statements(first(pats)), check_identifiers=false))
+end
+
 w_api = wrap_vulkan_api(api)
 write(w_api, joinpath(dirname(@__DIR__), "generated"))
+
+print_statements(api.funcs[:vkDestroyPipeline])
+print_statements(api.funcs[:vkCreateDevice])
+print_statements(w_api.structs[:InstanceCreateInfo])

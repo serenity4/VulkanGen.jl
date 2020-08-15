@@ -26,7 +26,7 @@ default_spacing(decl::FDefinition) = decl.short ? "\n" : "\n"^2
 default_spacing(::CDefinition) = "\n"
 default_spacing(::EDefinition) = "\n"
 
-Base.write(io::IO, defs::AbstractArray{T}; spacing=default_spacing) where {T<: Declaration} =  write.(Ref(io), join(Iterators.flatten(zip(generate.(defs), spacing.(defs)))))
+Base.write(io::IO, defs::AbstractArray{T}; spacing=default_spacing) where {T <: Declaration} =  write.(Ref(io), join(Iterators.flatten(zip(generate.(defs), spacing.(defs)))))
 
 """Write a wrapped API to files in dest_dir.
 
@@ -45,7 +45,7 @@ end
 @with_kw mutable struct StructWrapper <: Wrapper
     structs::AbstractArray{SDefinition} = SDefinition[]
     constructors::AbstractArray{FDefinition} = FDefinition[]
-    discard_field = (x, y) -> true # function which operates on name, type args for each struct field, returns a Bool
+    discard_field = (x, y) -> false # function which operates on name, type args for each struct field, returns a Bool
     field_transform = field_transform_default # function which operates on a name, type args for each struct field, returns a name => type pair or nothing
     name_transform = x -> x.name
     is_mutable_f = x -> false
@@ -54,8 +54,10 @@ end
 
 @with_kw mutable struct FuncWrapper <: Wrapper
     funcs::AbstractArray{FDefinition} = FDefinition[]
-    keep_arg = x -> true # function which operates on an Argument (PositionalArgument or KeywordArgument)
+    arg_transform = (decl, x) -> x
+    kwarg_transform = (decl, x) -> x 
     splice_arg = x -> nothing
+    name_transform = decl -> decl.name
 end
 
 @with_kw mutable struct ConstWrapper <: Wrapper # just here to hold consts and enums
@@ -72,18 +74,19 @@ end
 remove_lib_prefix(sym, lib_prefix) = isnothing(lib_prefix) ? sym : Symbol(replace(String(sym), lib_prefix * "." => ""))
 
 function type_dependencies(type::Symbol, lib_prefix)
-    eachmatch(r"{(.*)}", "$type ") |> Map(x -> getproperty(x, :captures)[1]) |> Map(x -> remove_lib_prefix(sym"$x", lib_prefix)) |> Map(remove_shape_info) |> Map(strip) |> Map(Symbol) |> collect
+    deps = eachmatch(r"{(.*)}", "$type ") |> Map(x -> getproperty(x, :captures)[1]) |> Map(x -> remove_lib_prefix(sym"$x", lib_prefix)) |> Map(Symbol ∘ strip ∘ remove_shape_info) |> collect
+    filter(x -> x != type, deps)
 end
 
 is_opaque_ptr(ptr) = ptr == Ptr{Nothing}
 
-function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameters=Dict(), spliced_args=Dict(), type_conversions=Dict(), struct_wrapper=StructWrapper(), func_wrapper=FuncWrapper(), const_wrapper=ConstWrapper(), wrapped_api = nothing)
+function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameters=Dict(), spliced_args=Dict(), type_conversions=Dict(), struct_wrapper=StructWrapper(), func_wrapper=FuncWrapper(), const_wrapper=ConstWrapper(), wrapped_api=nothing)
 
     w_api = isnothing(wrapped_api) ? WrappedAPI(api.source, SDefinition[], FDefinition[], CDefinition[], EDefinition[]) : wrapped_api
     
     function isknown(type)
         type ∈ keys(type_conversions) && return true
-        subtypes = filter(x -> x != type, type_dependencies(type, lib_prefix))
+        subtypes = type_dependencies(type, lib_prefix)
         !isempty(subtypes) && all(isknown(subtype) for subtype ∈ subtypes)
     end
     isknown(sdef::SDefinition) = isknown(sdef.name)
@@ -118,7 +121,7 @@ function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameter
                 continue
             end
             if !isknown(type)
-                for t ∈ type_dependencies(type, lib_prefix) # also includes original type
+                for t ∈ type_dependencies(type, lib_prefix)
                     if t != sdef.name && t ∈ keys(api.structs) && t ∉ keys(type_conversions) # avoid recursive struct field definitions, do not parse non-API types and do not rewrap a wrapped type
                         wrap!(struct_wrapper, api.structs[t])
                     end
@@ -160,6 +163,17 @@ function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameter
         push!(struct_wrapper.constructors, co)
     end
 
+    function wrap!(func_wrapper::FuncWrapper, fdef::FDefinition)
+        args = isempty(fdef.signature.args) ? [] : map(func_wrapper.arg_transform, Ref(fdef), fdef.signature.args)
+        kwargs = isempty(fdef.signature.kwargs) ? [] : map(func_wrapper.kwarg_transform, Ref(fdef), fdef.signature.kwargs)
+        name = func_wrapper.name_transform(fdef)
+        # body = statements(patterns(fdef))
+        body = fdef.body
+        new_fdef = FDefinition(name, Signature(name, args, kwargs), fdef.short, body)
+        push!(func_wrapper.funcs, new_fdef)
+        func_wrapper
+    end
+
     function parse_ptr(sym)
         str = String(sym)
         base = Symbol(startswith(str, vk_prefix(CamelCaseUpper)) ? str[3:end] : sym)
@@ -168,7 +182,7 @@ function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameter
 
     function wrap!(wrapper::Wrapper, objects, errors)
         for obj ∈ objects
-            if !isknown(obj)
+            if !isknown(obj.name)
                 try
                     wrap!(wrapper, obj)
                 catch e
@@ -185,7 +199,7 @@ function wrap_api(api::API; is_mutable=x -> false, lib_prefix=nothing, parameter
     function wrap!(w_api)
         errors = OrderedDict()
         wrap!(struct_wrapper, values(api.structs), errors)
-        # wrap!(func_wrapper, values(api.funcs), errors)
+        wrap!(func_wrapper, values(api.funcs), errors)
         length(errors) == 0 ? @info("API successfully wrapped.") : @warn("API wrapped with $(length(errors)) errors:")
         for (field, msg) ∈ errors
             println("\t\e[31;1;1m$field: $msg\e[m")

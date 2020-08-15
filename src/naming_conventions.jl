@@ -42,12 +42,13 @@ CamelCaseUpper(parts::AbstractArray) = CamelCaseUpper(uppercasefirst(camel_case(
 snake_case(parts::AbstractArray) = join(parts, "_")
 camel_case(parts::AbstractArray) = length(parts) == 1 ? parts[1] : join([parts[1], uppercasefirst.(parts[2:end])...])
 
-Base.convert(T::Type{SnakeCaseLower}, str::SnakeCaseUpper) = T(uppercase(str.value))
-Base.convert(T::Type{SnakeCaseUpper}, str::SnakeCaseLower) = T(lowercase(str.value))
+Base.convert(T::Type{SnakeCaseLower}, str::SnakeCaseUpper) = T(lowercase(str.value))
+Base.convert(T::Type{SnakeCaseUpper}, str::SnakeCaseLower) = T(uppercase(str.value))
 Base.convert(T::Type{CamelCaseLower}, str::CamelCaseUpper) = T(lowercase(str.value[1]) * str.value[2:end])
 Base.convert(T::Type{CamelCaseUpper}, str::CamelCaseLower) = T(uppercasefirst(str.value))
 Base.convert(T::Type{<: CamelCase}, str::SnakeCase) = T(split(str))
 Base.convert(T::Type{<: SnakeCase}, str::CamelCase) = T(split(str))
+Base.convert(T::Type{<: NamingConvention}, str::Union{Symbol,AbstractString}) = Base.convert(T, (detect_convention("$str", instance=true)))
 
 is_camel_case(str) = !occursin("_", str)
 is_snake_case(str) = lowercase(str) == str || uppercase(str) == str
@@ -55,11 +56,17 @@ is_snake_case(str) = lowercase(str) == str || uppercase(str) == str
 is_camel_case(str::NamingConvention) = is_camel_case(str.value)
 is_snake_case(str::NamingConvention) = is_snake_case(str.value)
 
-function remove_parts(str::T, parts) where T <: NamingConvention
+function remove_parts(str::T, discarded_parts) where T <: NamingConvention
     splitted_str = split(str)
-    parts_to_keep = 1:length(splitted_str) |> x -> filter(y -> y ∉ parts, x) |> collect
+    parts_to_keep = 1:length(splitted_str) |> x -> filter(y -> y ∉ discarded_parts, x) |> collect
     kept_parts = getindex.(Ref(splitted_str), parts_to_keep)
     T(kept_parts)
+end
+
+function remove_parts(str; discarded_parts=[1], convert_to=nothing, as_symbol=true)
+    base = remove_parts(detect_convention("$str", instance=true), discarded_parts)
+    return_f = (as_symbol ? x -> Symbol(x.value) : x -> x.value) ∘ (isnothing(convert_to) ? x -> x : x -> convert(convert_to, x))
+    return_f(base)
 end
 
 """Add a prefix following the naming convention present in the name.
@@ -77,6 +84,7 @@ function detect_convention(str; instance=false)
     is_snake_case(str) && uppercase(str) == str && return instanced(SnakeCaseUpper, str)
     error("No convention detected for string $str")
 end
+
 
 const code_convention_names = [
     :struct,

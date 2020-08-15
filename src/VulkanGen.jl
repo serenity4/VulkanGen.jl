@@ -45,6 +45,8 @@ KeywordArgument,
 StructWrapper,
 ConstWrapper,
 FuncWrapper,
-vk_structure_constant
+vk_structure_constant,
+patterns,
+vulkan_to_julia
 
 end

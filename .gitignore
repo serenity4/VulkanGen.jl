@@ -2,3 +2,4 @@
 /generated
 JuliaSysimage.so
 Manifest.toml
+*.code-workspace

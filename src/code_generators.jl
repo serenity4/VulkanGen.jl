@@ -128,17 +128,7 @@ function wrap!(varnames, arg::PointerArgument; deps_variable="deps", suffix="_re
     push!(deps, $(varname)_ref)"""
 end
 
-function wrap!(varnames, f::Finalization)
-    vk_finalizer_sym = first(match(Finalizer(), Symbol(f.vt_base), max_matches=1))
-    vk_finalizer = first(methods(getproperty(vk, vk_finalizer_sym)))
-    args = splice!(varnames, vk_finalizer, nothing)
-    x = convert(SnakeCaseLower, CamelCaseUpper(f.vt_base)).value
-    args[findfirst(args .== convert(CamelCaseLower, SnakeCaseLower(x)).value)] = "x.handle"
-    @assert !any(isnothing.(args)) "$args"
-    """
-    Base.finalizer(x -> $(vk_finalizer.name)($(join(args, ", "))), $x)
-    """
-end
+
 
 function generate(sw::StructWrapper)
     vt_base = remove_vk_prefix(String(Symbol(sw.vk_type)))

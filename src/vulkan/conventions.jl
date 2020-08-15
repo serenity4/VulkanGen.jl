@@ -15,4 +15,16 @@ function prefix_vk(name)
 end
 prefix_vk(name::T) where {T <: NamingConvention} = prefix(name, vk_prefix(typeof(name)))
 
+function put_ptr_to_end(name)
+    name_snake = SnakeCaseLower(name)
+    new_name = SnakeCaseLower([split(name_snake)[2:end]..., "ptr"]).value
+end
 
+function replace_count_argument(args, arg)
+    !endswith("$arg", "_count") && return arg
+    skl_arg = SnakeCaseLower("$arg")
+    arg_nocount = remove_parts(skl_arg, [length(split(skl_arg))]).value
+    counted_thing_candidates = filter(x -> x != arg && occursin(arg_nocount, "$x"), args)
+    @assert length(counted_thing_candidates) == 1 "No or too many candidates for counted elements from $arg ($counted_thing_candidates)"
+    sym"length($(counted_thing_candidates[1]))"
+end
