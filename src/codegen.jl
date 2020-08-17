@@ -51,6 +51,7 @@ end
 
 Statement(body::AbstractString) = Statement(strip(body), nothing, [])
 SDefinition(name::Symbol, is_mutable::Bool; fields=()) = SDefinition(name, is_mutable, OrderedDict(fields))
+Signature(sdef::SDefinition) = Signature(sdef.name, PositionalArgument.(keys(sdef.fields)), KeywordArgument[])
 
 function decompose_field_decl(typed_field)
     parts = split(typed_field, "::")
@@ -122,7 +123,7 @@ function check(statements::AbstractArray{Statement}, init_ids)
             push!(ids, st.assigned_id)
         end
         for id ∈ st.evaluated_ids
-            id ∈ ids || error("Unknown identifier $id")
+            id ∈ ids || error("Unknown identifier $id in \n$(join(getproperty.(statements, :body), "\n"))")
         end
     end
 end
@@ -143,8 +144,8 @@ function generate(s::SDefinition)
     format_text("$def $fields end")
 end
 
-function generate(f::FDefinition; check_body=true)
-    body = check_body ? generate(f.body, f.signature) : generate(f.body, check_identifiers=false)
+function generate(f::FDefinition; check_identifiers=true)
+    body = check_identifiers ? generate(f.body, f.signature) : generate(f.body, check_identifiers=false)
     if f.short
         str = generate(f.signature) * " = " * body
     else

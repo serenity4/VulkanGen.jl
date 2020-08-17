@@ -27,10 +27,15 @@ Base.split(str::SnakeCase) = split(str.value, "_")
 function Base.split(str::CamelCase)
     strval = str.value
     lowercase(strval) == strval && return [strval]
-    first_regex = uppercase(strval[1]) == strval[1] ? r"[A-Z]+?[A-Z]" : r"[a-z]+?[A-Z]"
-    until_first_uppercase = match(first_regex, strval)
-    other_matches = getproperty.(collect(eachmatch(r"[A-Z]+[a-z]*", strval)), :match)
-    isnothing(until_first_uppercase) ? other_matches : [until_first_uppercase.match[1:end - 1], other_matches...]
+    length(strval) > 1 && lowercase(strval[2:end]) == strval[2:end] && return [strval]
+    reg_upper = r"(([A-Z]+|\d+)(?=(([A-Z]+|\d+)|$))|([A-Z]{1})[a-z]*?(?=($|([A-Z]|\d))))"
+    if uppercase(strval[1]) == strval[1] # CamelCaseUpper
+        matches = getproperty.(collect(eachmatch(reg_upper, strval)), :match)
+    else
+        first = match(r"[a-z]+(?=([A-Z]|\d))", strval).match
+        matches = [first, getproperty.(collect(eachmatch(reg_upper, strval)), :match)...]
+    end
+    matches
 end
 
 SnakeCaseLower(parts::AbstractArray) = SnakeCaseLower(lowercase(snake_case(parts)))
@@ -48,7 +53,7 @@ Base.convert(T::Type{CamelCaseLower}, str::CamelCaseUpper) = T(lowercase(str.val
 Base.convert(T::Type{CamelCaseUpper}, str::CamelCaseLower) = T(uppercasefirst(str.value))
 Base.convert(T::Type{<: CamelCase}, str::SnakeCase) = T(split(str))
 Base.convert(T::Type{<: SnakeCase}, str::CamelCase) = T(split(str))
-Base.convert(T::Type{<: NamingConvention}, str::Union{Symbol,AbstractString}) = Base.convert(T, (detect_convention("$str", instance=true)))
+Base.convert(T::Type{<: NamingConvention}, str::S) where {S <: Union{Symbol,AbstractString}} = S(Base.convert(T, (detect_convention("$str", instance=true))).value)
 
 is_camel_case(str) = !occursin("_", str)
 is_snake_case(str) = lowercase(str) == str || uppercase(str) == str

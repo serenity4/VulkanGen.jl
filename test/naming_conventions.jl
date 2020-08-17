@@ -14,6 +14,14 @@ const_c2  = CamelCaseUpper("ThisIsSomeMessage")
 
 longstr = SnakeCaseLower("my_snake_case_with_many_words")
 
+camel_split_l_c1 = CamelCaseLower("myCamel2")
+camel_split_l_c2 = CamelCaseLower("myCamel2KHRExt")
+camel_split_l_c3 = CamelCaseLower("myCamel2Ext4")
+
+camel_split_u_c1 = CamelCaseUpper("MyCamel2")
+camel_split_u_c2 = CamelCaseUpper("MyCamel2KHRExt")
+camel_split_u_c3 = CamelCaseUpper("MyCamel2Ext4")
+
 @testset "Naming conventions" begin
     include("naming_conventions/lib.jl")
     include("naming_conventions/vulkan.jl")

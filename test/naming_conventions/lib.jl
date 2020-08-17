@@ -1,4 +1,12 @@
 @testset "Library" begin
+    @testset "Camel Case Splitting" begin
+        @test split(camel_split_l_c1) == ["my", "Camel", "2"]
+        @test split(camel_split_l_c2) == ["my", "Camel", "2", "KHR", "Ext"]
+        @test split(camel_split_l_c3) == ["my", "Camel", "2", "Ext", "4"]
+        @test split(camel_split_u_c1) == ["My", "Camel", "2"]
+        @test split(camel_split_u_c2) == ["My", "Camel", "2", "KHR", "Ext"]
+        @test split(camel_split_u_c3) == ["My", "Camel", "2", "Ext", "4"]
+    end
     @testset "Conversions" begin
         @test Base.convert(CamelCaseLower, const_s1) == const_c1
         @test Base.convert(CamelCaseLower, const_s2) == const_c1

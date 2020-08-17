@@ -1,7 +1,5 @@
-vk_structure_constant(base) = getproperty(vk, Symbol("VK_STRUCTURE_TYPE_" * convert(SnakeCaseUpper, "$base").value))
-
 function statements(ci::CreateInfo)
-    stype_arg = vk_structure_constant(ci.sdef.name)
+    stype_arg = stypes["$(ci.sdef.name)"]
     args = collect(keys(ci.sdef.fields))
     args_replaced = args |> Map(x -> replace_count_argument(args, x)) |> collect
     [Statement("create_info = $(ci.sdef.name)($stype_arg, $(join_args(args_replaced)))", :create_info, args_replaced),

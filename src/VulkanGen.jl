@@ -1,6 +1,6 @@
 module VulkanGen
 
-using Pipe, Transducers, DataStructures, JuliaFormatter, Parameters
+using Pipe, Transducers, DataStructures, JuliaFormatter, Parameters, EzXML
 using VulkanCore.vk
 using VulkanCore:vk
 using VulkanCore
@@ -45,7 +45,6 @@ KeywordArgument,
 StructWrapper,
 ConstWrapper,
 FuncWrapper,
-vk_structure_constant,
 patterns,
 vulkan_to_julia
 

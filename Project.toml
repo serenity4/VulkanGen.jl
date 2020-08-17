@@ -5,6 +5,7 @@ version = "0.1.0"
 
 [deps]
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
+EzXML = "8f5d6c58-4d21-5cfd-889c-e3ad7ee6a615"
 JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
 Parameters = "d96e819e-fc66-5662-9728-84c9c7592b0a"
 Pipe = "b98c9c47-44ae-5843-9183-064241ee97a0"

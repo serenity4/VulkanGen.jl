@@ -31,6 +31,7 @@ struct Finalizer <: Pattern
     end
 end
 
+
 const patterns_dict = OrderedDict(
     (decl -> startswith("$(decl.name)", "create_")) => Create,
     (decl -> occursin("CreateInfo", "$(decl.name)")) => CreateInfo,
