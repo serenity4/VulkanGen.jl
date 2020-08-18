@@ -1,25 +1,25 @@
-s1 = Statement("a=2", :a, [])
-s2 = Statement("b=a+2", :b, [:a])
-s3 = Statement("a=b", :a, [:a, :b])
+s1 = Statement("a=2", "a", [])
+s2 = Statement("b=a+2", "b", ["a"])
+s3 = Statement("a=b", "a", ["a", "b"])
 
-s4 = Statement("a += b", nothing, [:a, :b])
-s5 = Statement("a += c", nothing, [:a, :c])
-s6 = Statement("a = b", :a, [:b])
+s4 = Statement("a += b", nothing, ["a", "b"])
+s5 = Statement("a += c", nothing, ["a", "c"])
+s6 = Statement("a = b", "a", ["b"])
 
-sdef1 = SDefinition(:sdef1, false)
-sdef2 = SDefinition(:sdef2, true)
-sdef3 = SDefinition(:sdef3, true, fields=(:device => Ptr{Nothing}, :notype => nothing))
+sdef1 = SDefinition("sdef1", false)
+sdef2 = SDefinition("sdef2", true)
+sdef3 = SDefinition("sdef3", true, fields=("device" => Ptr{Nothing}, "notype" => nothing))
 
 signature = Signature(first(methods(replace)))
-fdef1 = FDefinition(:replace, signature, false, [])
-fdef2 = FDefinition(:replace, signature, false, [Statement("a=5")])
-fdef3 = FDefinition(:replace, signature, false, Statement.(["i=1", "i+=1", "nothing"]))
+fdef1 = FDefinition("replace", signature, false, [])
+fdef2 = FDefinition("replace", signature, false, [Statement("a=5")])
+fdef3 = FDefinition("replace", signature, false, Statement.(["i=1", "i+=1", "nothing"]))
 
-cdef1 = CDefinition(:c1, 0)
-cdef2 = CDefinition(:c2, "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]")
+cdef1 = CDefinition("c1", 0)
+cdef2 = CDefinition("c2", "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]")
 
-edef1 = EDefinition(name=:e1, fields=[:a, :b, :c, :d])
-edef2 = EDefinition(name=:e1, fields=[:a, :b, :c, :d], with_begin_block=true, enum_macro=Symbol("@enum"))
+edef1 = EDefinition(name="e1", fields=["a", "b", "c", "d"])
+edef2 = EDefinition(name="e1", fields=["a", "b", "c", "d"], with_begin_block=true, enum_macro="@enum")
 
 @testset "Definitions" begin
     @testset "Structure definition" begin
@@ -41,7 +41,7 @@ edef2 = EDefinition(name=:e1, fields=[:a, :b, :c, :d], with_begin_block=true, en
                              i += 1
                              nothing
                          end""")
-        @test_throws ErrorException generate(FDefinition(:replace, signature, true, [])) # short notation for a function without body
+        @test_throws ErrorException generate(FDefinition("replace", signature, true, [])) # short notation for a function without body
     end
     @testset "Statements" begin
         @test @test_logs((:warn, "Overriding identifier a"), generate([s1, s2, s3])) == format_text("""a = 2

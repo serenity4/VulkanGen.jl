@@ -13,35 +13,33 @@ end
 
 
 struct SDefinition <: Declaration
-    name::Symbol
+    name::AbstractString
     is_mutable::Bool
     fields::OrderedDict
 end
 
 
 struct FDefinition <: Declaration
-    name::Symbol
+    name::AbstractString
     signature::Signature
     short::Bool
     body::AbstractArray{Statement}
 end
 
 struct CDefinition <: Declaration
-    name::Symbol
+    name::AbstractString
     value
 end
 
 @with_kw struct EDefinition <: Declaration
-    name::Symbol
+    name::AbstractString
     fields
     with_begin_block::Bool = length(fields) > 8
     type = nothing
-    enum_macro::Symbol = sym"@enum"
+    enum_macro::AbstractString = "@enum"
 end
 
-OrderedDict(defs::AbstractArray{T}) where {T <: Declaration} = OrderedDict{Symbol,T}(map(x -> x.name => x, defs))
-
-EDefinition(name, fields, with_begin_block) = EDefinition(name, fields, with_begin_block, nothing, sym"@enum")
+OrderedDict(defs::AbstractArray{T}) where {T <: Declaration} = OrderedDict{AbstractString,T}(map(x -> x.name => x, defs))
 
 generate(cdef::CDefinition) = format_text("const $(cdef.name) = $(cdef.value)")
 function generate(edef::EDefinition)
@@ -50,13 +48,8 @@ function generate(edef::EDefinition)
 end
 
 Statement(body::AbstractString) = Statement(strip(body), nothing, [])
-SDefinition(name::Symbol, is_mutable::Bool; fields=()) = SDefinition(name, is_mutable, OrderedDict(fields))
+SDefinition(name::AbstractString, is_mutable::Bool; fields=()) = SDefinition(name, is_mutable, OrderedDict(fields))
 Signature(sdef::SDefinition) = Signature(sdef.name, PositionalArgument.(keys(sdef.fields)), KeywordArgument[])
-
-function decompose_field_decl(typed_field)
-    parts = split(typed_field, "::")
-    length(parts) == 1 ? Symbol(parts[1]) => nothing : Symbol(parts[1]) => Symbol(parts[2])
-end
 
 function extract_args(str)
     split_str = split(str, ";") # get kwargs first
@@ -82,13 +75,13 @@ function FDefinition(str::AbstractString)
         kwargs = []
     end
     args = PositionalArgument.(splitargs(args_str))
-    sig = Signature(sym"$id", args, kwargs)
-    FDefinition(sym"$id", sig, short, body)
+    sig = Signature(id, args, kwargs)
+    FDefinition(id, sig, short, body)
 end
 
 function CDefinition(str::AbstractString)
     split_str = split(str, " ")
-    id = Symbol(split_str[2])
+    id = split_str[2]
     value_multiline = splitjoin(str, [1], delim="=")
     value = replace(join(splitstrip(value_multiline; delim="\n"), "\n"), "\n" => " ") # remove any whitespace for each line
     CDefinition(id, value)
@@ -96,9 +89,8 @@ end
 
 function EDefinition(str::AbstractString)
     split_str = split(str, " ")
-    enum_macro, id = Symbol.(split_str[1:2])
-    split_id = split("$id", "::")
-    id, type = Symbol(first(split_id)), length(split_id) == 1 ? nothing : Symbol(last(split_id))
+    enum_macro, id = split_str[1:2]
+    id, type = decompose_field_decl(id)
     split_str_n = splitstrip(str, delim="\n")
     with_begin_block = last(split(split_str_n[1], " ")) == "begin"
     values = with_begin_block ? strip.(split(join(split_str_n[2:end - 1], "\n"), "\n")) : strip.(splitjoin(str, [1, 2], delim=" "))
@@ -112,12 +104,12 @@ function SDefinition(str::AbstractString)
     is_mutable = def_parts[1] == "mutable"
     name = is_mutable ? def_parts[3] : def_parts[2]
     field_decls = OrderedDict(decompose_field_decl(field) for field ∈ split_str[2:end - 1]) # skip struct... and end lines
-    SDefinition(sym"$name", is_mutable, field_decls)
+    SDefinition(name, is_mutable, field_decls)
 end
 
 function check(statements::AbstractArray{Statement}, init_ids)
     ids = copy(init_ids)
-    for st in statements
+    for st ∈ statements
         if !isnothing(st.assigned_id)
             st.assigned_id ∉ ids || @warn "Overriding identifier $(st.assigned_id)"
             push!(ids, st.assigned_id)

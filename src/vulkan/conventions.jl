@@ -14,8 +14,3 @@ function prefix_vk(name)
    prefix(convention(name), vk_prefix(convention)).value
 end
 prefix_vk(name::T) where {T <: NamingConvention} = prefix(name, vk_prefix(typeof(name)))
-
-function put_ptr_to_end(name)
-    name_snake = convert(SnakeCaseLower, CamelCaseLower("$name"))
-    new_name = typeof(name)(SnakeCaseLower([split(name_snake)[2:end]..., "ptr"]).value)
-end

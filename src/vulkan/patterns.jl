@@ -13,7 +13,7 @@ struct Create <: Pattern
     type
 
     function Create(decl)
-        type = remove_parts(decl.name, discarded_parts=[1, 2], as_symbol=true)
+        type = remove_parts(decl.name, discarded_parts=[1, 2])
         new(decl, type)
     end
 end
@@ -26,21 +26,20 @@ struct Finalizer <: Pattern
     f::FDefinition
     x
     function Finalizer(decl)
-        x = remove_parts(decl.name, discarded_parts=[1, 2], convert_to=SnakeCaseLower, as_symbol=true)
+        x = remove_parts(decl.name, discarded_parts=[1, 2], convert_to=SnakeCaseLower)
         new(decl, x)
     end
 end
 
 
 const patterns_dict = OrderedDict(
-    (decl -> startswith("$(decl.name)", "create_")) => Create,
-    (decl -> occursin("CreateInfo", "$(decl.name)")) => CreateInfo,
-    (decl -> startswith("$(decl.name)", "vkCmd")) => Command,
-    (decl -> startswith("$(decl.name)", "vkDestroy")) => Finalizer,
+    (decl -> startswith(decl.name, "create_")) => Create,
+    (decl -> occursin("CreateInfo", decl.name)) => CreateInfo,
+    (decl -> startswith(decl.name, "vkCmd")) => Command,
+    (decl -> startswith(decl.name, "vkDestroy")) => Finalizer,
 )
 
 function patterns(decl::Declaration)
-    name = "$(decl.name)"
     patterns_found = []
     for (ispattern, pat) ∈ patterns_dict
         ispattern(decl) ? push!(patterns_found, pat(decl)) : nothing

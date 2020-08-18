@@ -7,7 +7,7 @@ mutable struct WrappedAPI
 end
 
 # not efficient
-vars(w_api) = OrderedDict([Pair(k, v) for field ∈ getproperty.(Ref(w_api), [:structs, :funcs, :consts, :enums]) for (k, v) ∈ field])
+vars(w_api) = OrderedDict([k => v for field ∈ getproperty.(Ref(w_api), [:structs, :funcs, :consts, :enums]) for (k, v) ∈ field])
 
 Base.show(io::IO, w_api::WrappedAPI) = print(io, "Wrapped API with $(length(w_api.structs)) structs, $(length(w_api.funcs)) functions, $(length(w_api.consts)) consts and $(length(w_api.enums)) enums wrapped from $(w_api.source)")
 
@@ -42,36 +42,36 @@ end
 
 
 const default_type_conversions = Dict(
-    :Cstring => :Cstring,
-    :Float32 => :Float32,
-    :Float64 => :Float64,
-    :Int32 => :Int32,
-    :Int64 => :Int64,
-    :Nothing => :Nothing,
-    sym"Ptr{Nothing}" => sym"Ptr{Nothing}",
-    :UInt16 => :UInt16,
-    :UInt32 => :UInt32,
-    :UInt64 => :UInt64,
-    :UInt8 => :UInt8,
-    :Cdouble => :Float64,
-    :Cfloat => :Float32,
-    :Cint => :Int32,
-    :Csize_t => :UInt,
-    :Cssize_t => :Int,
-    :Cstring => :String,
-    :Cuint => :UInt32,
-    :VkBool32 => :Bool,
+    "Cstring" => "Cstring",
+    "Float32" => "Float32",
+    "Float64" => "Float64",
+    "Int32" => "Int32",
+    "Int64" => "Int64",
+    "Nothing" => "Nothing",
+    "Ptr{Nothing}" => "Ptr{Nothing}",
+    "UInt16" => "UInt16",
+    "UInt32" => "UInt32",
+    "UInt64" => "UInt64",
+    "UInt8" => "UInt8",
+    "Cdouble" => "Float64",
+    "Cfloat" => "Float32",
+    "Cint" => "Int32",
+    "Csize_t" => "UInt",
+    "Cssize_t" => "Int",
+    "Cstring" => "String",
+    "Cuint" => "UInt32",
+    "VkBool32" => "Bool",
     )
     
     
     
 is_opaque_ptr(ptr) = ptr == Ptr{Nothing}
-stype_splice(fdef) = getproperty(vk, Symbol(stypes["$(fdef.name)"]))
+stype_splice(fdef) = getproperty(vk, Symbol(stypes[fdef.name]))
 
 # arguments whose value is always predetermined by the function signature
 # they are dropped as argument and replaced wherever necessary
 const spliced_args = Dict(
-    :sType => stype_splice,
+    "sType" => stype_splice,
 )
 include("wrapping/function_logic.jl")
 include("wrapping/constructor_logic.jl")
@@ -88,8 +88,8 @@ function wrap_api(api::API; type_conversions=deepcopy(default_type_conversions))
     isknown(sdef::SDefinition) = isknown(sdef.name)
     isknown(fdef::Declaration) = false
 
-    function is_struct(sym)
-        sym_eval = api.eval(sym)
+    function is_struct(str)
+        sym_eval = api.eval(Symbol(str))
         !(sym_eval <: Tuple) && isstructtype(sym_eval) # tuples are composite types
     end
 
@@ -97,7 +97,7 @@ function wrap_api(api::API; type_conversions=deepcopy(default_type_conversions))
         type ∈ keys(type_conversions) && return type_conversions[type]
         new_type = type
         for t ∈ type_dependencies(type)
-            new_type = Symbol(replace(String(new_type), "$t" => "$(type_conversions[t])"))
+            new_type = replace(String(new_type), "$t" => "$(type_conversions[t])")
         end
     end
 
@@ -126,7 +126,7 @@ function wrap_api(api::API; type_conversions=deepcopy(default_type_conversions))
             f = wrap_field_transform(name, type)
             new_fields[f.first] = f.second
         end
-        new_fields[:vk] = sdef.name
+        new_fields["vk"] = sdef.name
         new_name = name_transform(sdef)
         new_sdef = SDefinition(new_name, any(isa.(Finalizer, typeof.(patterns(sdef)))), new_fields)
         if sdef.name ∉ keys(type_conversions)
@@ -141,7 +141,7 @@ function wrap_api(api::API; type_conversions=deepcopy(default_type_conversions))
     function wrap_constructor!(w_api, new_sdef, sdef)
         fname = new_sdef.name
         kwargs = parameters_from_fields(sdef)
-        args = filter(x -> x.symbol != :vk, arguments_from_fields(new_sdef))
+        args = filter(x -> x.name != "vk", arguments_from_fields(new_sdef))
         sig = Signature(fname, args, kwargs)
         body = constructor_body(api, new_sdef, sdef, args, kwargs)
         co = FDefinition(fname, sig, length(body) == 1, body)
@@ -160,12 +160,12 @@ function wrap_api(api::API; type_conversions=deepcopy(default_type_conversions))
 
     function parse_ptr(sym)
         base = remove_prefix(sym)
-        SDefinition(sym, false, OrderedDict(:handle => sym"Ptr{Nothing}", :deps => :Any)) # will be transformed by the struct_wrapper
+        SDefinition(sym, false, OrderedDict("handle" => "Ptr{Nothing}", "deps" => "Any")) # will be transformed by the struct_wrapper
     end
 
     function convert_constptr_to_struct!(struct_dict, consts)
         for cdef ∈ consts
-            if is_opaque_ptr(api.eval(cdef.value)) && !startswith("$(cdef.name)", "PFN") # ignore function pointers
+            if is_opaque_ptr(api.eval(cdef.value)) && !startswith(cdef.name, "PFN") # ignore function pointers
                 sdef = parse_ptr(cdef.name)
                 struct_dict[sdef.name] = sdef
             end

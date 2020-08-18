@@ -53,7 +53,7 @@ Base.convert(T::Type{CamelCaseLower}, str::CamelCaseUpper) = T(lowercase(str.val
 Base.convert(T::Type{CamelCaseUpper}, str::CamelCaseLower) = T(uppercasefirst(str.value))
 Base.convert(T::Type{<: CamelCase}, str::SnakeCase) = T(split(str))
 Base.convert(T::Type{<: SnakeCase}, str::CamelCase) = T(split(str))
-Base.convert(T::Type{<: NamingConvention}, str::S) where {S <: Union{Symbol,AbstractString}} = S(Base.convert(T, (detect_convention("$str", instance=true))).value)
+nc_convert(T::Type{<: NamingConvention}, str::AbstractString) = Base.convert(T, (detect_convention(str, instance=true))).value
 
 is_camel_case(str) = !occursin("_", str)
 is_snake_case(str) = lowercase(str) == str || uppercase(str) == str
@@ -68,18 +68,13 @@ function remove_parts(str::T, discarded_parts) where T <: NamingConvention
     T(kept_parts)
 end
 
-function remove_parts(str; discarded_parts=[1], convert_to=nothing, as_symbol=true)
-    base = remove_parts(detect_convention("$str", instance=true), discarded_parts)
-    return_f = (as_symbol ? x -> Symbol(x.value) : x -> x.value) ∘ (isnothing(convert_to) ? x -> x : x -> convert(convert_to, x))
-    return_f(base)
-end
+remove_parts(str; discarded_parts=[1]) = remove_parts(detect_convention(str, instance=true), discarded_parts)
 
 """Add a prefix following the naming convention present in the name.
 """
 prefix(name::T, prefix) where {T <: NamingConvention} =  T([prefix, split(name)...])
 remove_prefix(name::T) where {T <: NamingConvention} = T(split(name)[2:end])
 remove_prefix(str) = remove_prefix(detect_convention(str, instance=true)).value
-remove_prefix(sym::Symbol) = Symbol(remove_prefix(detect_convention(String(sym), instance=true)).value)
 
 function detect_convention(str; instance=false)
     instanced(T, x) = instance ? T(x) : T
@@ -123,7 +118,6 @@ function enforce_convention(str, code_convention_mapping, code_object; pickout_p
 end
 
 enforce_convention(str, old_convention, new_convention, code_object; pickout_parts=nothing) = enforce_convention(str, map_dicts(old_convention, new_convention), code_object; pickout_parts)
-enforce_convention(str::Symbol, args...; kwargs...)::Symbol = Symbol(enforce_convention(String(str), args...; kwargs...))
 
 function is_code_convention_respected(str, code_object, code_convention)
     try

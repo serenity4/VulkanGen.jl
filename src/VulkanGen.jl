@@ -46,6 +46,7 @@ StructWrapper,
 ConstWrapper,
 FuncWrapper,
 patterns,
-vulkan_to_julia
+vulkan_to_julia,
+nc_convert
 
 end

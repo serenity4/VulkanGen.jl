@@ -11,11 +11,11 @@ function constructor_body(api, new_sdef, sdef::SDefinition, args, kwargs)
         counted_arg = len_element(arg, sdef.name)
         if !isnothing(counted_arg)
             push!(body, Statement("$arg = length($(field_transform(counted_arg)))", arg, [counted_arg]))
-        elseif arg == :sType
-            push!(body, Statement("sType = $(stypes["$(sdef.name)"])", :sType, []))
-        elseif startswith("$arg", "p") && arg != :pNext
-            ptr_arg = put_ptr_to_end(arg)
-            if lstrip("$arg", 'p') == "$(new_sdef.name)"
+        elseif arg == "sType"
+            push!(body, Statement("sType = $(stypes[sdef.name])", "sType", []))
+        elseif startswith(arg, "p") && arg != "pNext"
+            ptr_arg = field_transform(arg) * "_ptr"
+            if lstrip(arg, 'p') == new_sdef.name
                 push!(body, Statement("$arg = Ref{$(sdef.name)}()", arg, []))
             else
                 push!(body, Statement("$arg = Ref($(field_transform(arg)))", arg, [arg]))
@@ -24,7 +24,7 @@ function constructor_body(api, new_sdef, sdef::SDefinition, args, kwargs)
         push!(vk_creation_args, arg)
     end
 
-    push!(body, Statement("vk = $(vk_const_sig.symbol)($(join_args(vk_creation_args)))", :vk, vk_creation_args))
+    push!(body, Statement("vk = $(vk_const_sig.name)($(join_args(vk_creation_args)))", "vk", vk_creation_args))
     push!(body, Statement("$(generate(new_sig))", nothing, argnames(new_sig)))
     body
 end

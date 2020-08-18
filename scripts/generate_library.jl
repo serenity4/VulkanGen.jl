@@ -12,8 +12,8 @@ function print_statements(decl)
 end
 
 ignored_symbols = [
-    :VkBaseOutStructure,
-    :VkBaseInStructure,
+    "VkBaseOutStructure",
+    "VkBaseInStructure",
 ]
 
 function filter_api(api)

@@ -1,11 +1,11 @@
 function arg_transform(decl, arg)
-    PositionalArgument(convert(SnakeCaseLower, arg.symbol), arg.type)
+    PositionalArgument(nc_convert(SnakeCaseLower, arg.name), arg.type)
 end
 
 function kwarg_transform(decl, arg)
-    KeywordArgument(convert(SnakeCaseLower, kwarg.symbol), kwarg.default)
+    KeywordArgument(nc_convert(SnakeCaseLower, kwarg.name), kwarg.default)
 end
 
 function name_transform(decl::FDefinition)
-    convert(SnakeCaseLower, decl.name)
+    nc_convert(SnakeCaseLower, decl.name)
 end
