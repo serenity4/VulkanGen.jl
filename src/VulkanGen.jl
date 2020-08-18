@@ -9,6 +9,10 @@ include("utils.jl")
 include("naming_conventions.jl")
 include("signatures.jl")
 include("codegen.jl")
+
+include("VulkanSpec.jl")
+using .VulkanSpec
+
 include("vulkan.jl")
 include("parse.jl")
 include("wrap_api.jl")

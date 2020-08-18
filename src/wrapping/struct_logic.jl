@@ -49,6 +49,6 @@ function field_transform(name, type)
     field_transform(name) => rename_type(type)
 end
 
-discard_field(name, type, sdef) = name ∈ dropped_fields || !isnothing(len_element(name, sdef.name))
+discard_field(name, type, sdef) = name ∈ dropped_fields || !isnothing(cardinality(name, sdef.name))
 
 name_transform(decl::SDefinition) = decl.name[3:end]

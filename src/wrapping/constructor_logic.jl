@@ -8,7 +8,7 @@ function constructor_body(api, new_sdef, sdef::SDefinition, args, kwargs)
     new_sig = Signature(new_sdef)
     
     for arg ∈ argnames(vk_const_sig)
-        counted_arg = len_element(arg, sdef.name)
+        counted_arg = cardinality(arg, sdef.name)
         if !isnothing(counted_arg)
             push!(body, Statement("$arg = length($(field_transform(counted_arg)))", arg, [counted_arg]))
         elseif arg == "sType"
