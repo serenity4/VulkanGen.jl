@@ -11,15 +11,14 @@ function print_statements(decl)
     println(generate(statements(first(pats)), check_identifiers=false))
 end
 
-const remove_symbols = [
+ignored_symbols = [
     :VkBaseOutStructure,
     :VkBaseInStructure,
-    :VkPhysicalDeviceShaderIntegerFunctions2INTEL,
 ]
 
 function filter_api(api)
     new_api = deepcopy(api)
-    for sym ∈ remove_symbols
+    for sym ∈ ignored_symbols
         delete!(new_api.structs, sym)
     end
     new_api
