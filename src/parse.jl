@@ -12,7 +12,6 @@ API(source, structs, funcs, consts, enums) = API(source, structs, funcs, consts,
 extract_fields(apis, sym) = OrderedDict(vcat(collect.(getproperty.(apis, sym))...))
 merge(apis::API...) = API(getproperty.(apis, :source), extract_fields.(Ref(apis), [:structs, :funcs, :consts, :enums])..., nothing)
 
-API(files::AbstractArray{<: AbstractString}) = merge(API.(files)...)
 Base.show(io::IO, pf::API) = print(io, "API with $(length(pf.structs)) structs, $(length(pf.funcs)) functions, $(length(pf.consts)) consts and $(length(pf.enums)) enums from $(pf.source)")
 
 
@@ -63,10 +62,29 @@ function parse_for_definition(file, ::Type{T}) where {T <: Declaration}
     defs
 end
 
-function API(file)
+function convert_constptr_to_struct!(api)
+    for cdef ∈ values(api.consts)
+        if is_opaque_ptr(api.eval(cdef.value)) && !startswith(cdef.name, "PFN") # ignore function pointers
+            sdef = parse_ptr(cdef.name)
+            api.structs[sdef.name] = sdef
+        end
+    end
+end
+
+function parse_ptr(sym)
+    base = remove_prefix(sym)
+    SDefinition(sym, false, OrderedDict("handle" => "Ptr{Nothing}", "deps" => "Any")) # will be transformed by the struct_wrapper
+end
+
+function API(file, eval_symbol)
     defs = []
     for decl ∈ [SDefinition, FDefinition, CDefinition, EDefinition]
         push!(defs, parse_for_definition(file, decl))
     end
-    API(file, OrderedDict.(defs)...)
+    api = API(file, OrderedDict.(defs)...)
+    api.eval = eval_symbol
+    convert_constptr_to_struct!(api)
+    api
 end
+
+API(files::AbstractArray{<: AbstractString}, eval_symbol) = merge(API.(files, eval_symbol)...)

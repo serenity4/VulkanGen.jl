@@ -1,4 +1,4 @@
-pf = API(joinpath(@__DIR__, "resources", "defs.jl"))
+pf = API(joinpath(@__DIR__, "resources", "defs.jl"), sym -> @eval(vk, $(Meta.parse("$sym"))))
 
 # println(pf.structs)
 # println(pf.funcs)

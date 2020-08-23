@@ -1,6 +1,6 @@
 module VulkanGen
 
-using Pipe, Transducers, DataStructures, JuliaFormatter, Parameters, EzXML
+using Pipe, Transducers, DataStructures, JuliaFormatter, Parameters, EzXML, AbstractTrees
 using VulkanCore.vk
 using VulkanCore:vk
 using VulkanCore
@@ -16,6 +16,22 @@ using .VulkanSpec
 include("vulkan.jl")
 include("parse.jl")
 include("wrap_api.jl")
+
+module Generated
+
+using VulkanCore
+
+const vk = VulkanCore.vk
+const libvulkan = vk.libvulkan
+using VulkanCore.vk
+
+include("vk_utils.jl")
+include("ref_util.jl")
+
+include(joinpath(dirname(@__DIR__), "generated", "structs.jl"))
+include(joinpath(dirname(@__DIR__), "generated", "functions.jl"))
+    
+end # module Generated
 
 export vk,
 CamelCaseLower,
@@ -39,7 +55,7 @@ statements,
 vk_prefix,
 @sym_str,
 remove_prefix,
-wrap_api,
+wrap,
 API,
 parse_api,
 CDefinition,
@@ -51,6 +67,7 @@ ConstWrapper,
 FuncWrapper,
 patterns,
 vulkan_to_julia,
-nc_convert
+nc_convert,
+Generated
 
-end
+end # module VulkanGen

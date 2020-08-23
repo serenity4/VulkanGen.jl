@@ -7,7 +7,7 @@ Base.showerror(io::Core.IO, e::VulkanError) = print(io, "$(e.errorcode): ", e.ms
 """
     @check vkFunctionSomething()
 
-Checks whether the expression returned VK_SUCCESS. Else, throw an error printing the corresponding code."""
+Checks whether the expression returned VK_SUCCESS or any non-error codes. Else, throw an error printing the corresponding code."""
 macro check(expr)
     quote
         local msg = "failed to execute " * $(string(expr))
@@ -17,12 +17,14 @@ end
 
 macro check(expr, msg)
     quote
-        local expr_return_code = $(esc(expr))
-        if typeof(expr_return_code) != VkResult
-            throw(ErrorException("the return value must be a value of type VkResult"))
-        end
-        if expr_return_code != VK_SUCCESS
-            throw(VulkanError($msg, expr_return_code))
+        return_code = $(esc(expr))
+        # if typeof(return_code) != VkResult
+        #     throw(ErrorException("the return value must be a value of type VkResult"))
+        # end
+        if Int(return_code) > 0
+            @warn "Non-success return code $return_code"
+        elseif Int(return_code) < 0
+            throw(VulkanError($msg, return_code))
         end
     end
 end
@@ -32,15 +34,12 @@ end
 @generated function unsafe_pointer(obj)
     quote
         Base.unsafe_convert(Ptr{typeof(obj[])}, obj)
+        # pointer_from_objref(obj[])
     end
 end
 
-function vk_version(version::VersionNumber)
-    VK_MAKE_VERSION(getproperty.(Ref(version), [:major, :minor, :patch])...)
-end
+pointer_length(p) = p == C_NULL || isempty(p) ? 0 : length(p)
 
-int_to_version(version::Cuint) = VersionNumber(VK_VERSION_MAJOR(version),
-										  VK_VERSION_MINOR(version),
-										  VK_VERSION_PATCH(version))
-
-int_to_str(field) = String(filter(x -> x != 0, UInt8[field...]))
+convert_vk(::Type{T}, str::NTuple{N,UInt8}) where {N,T <: AbstractString} = T(filter(x -> x != 0, UInt8[str...]))
+convert_vk(::Type{VersionNumber}, version::UInt32) = VersionNumber(UInt32(version) >> 22, (UInt32(version) >> 12) & 0x3ff, UInt32(version) & 0xfff)
+convert_vk_back(::Type{UInt32}, version::VersionNumber) = (version.major << 22) + (version.minor << 12) + version.patch

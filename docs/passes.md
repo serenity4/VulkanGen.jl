@@ -1,29 +1,3 @@
-## Wrapping process
-
-#### Wrap opaque pointers into structs
-
-Transform opaque pointers defined as `const Ptr{Cvoid}` to a struct with
-
-- a `handle` field (which will store the pointer)
-- instantiation attributes
-- a `deps` field which will accommodate any pointer data that could be used with the pointer and that needs to be valid.
-
-They will adopt the Julia convention, with the "Vk" prefix removed
-
-#### Clean struct fields
-
-Remove unnecessary or initialization arguments (such as custom allocators and array lengths - see *array pointers and counting*).
-Convert pointer fields to regular fields (`String` instead of `Cstring` or `NTuple{256, UInt8}`, `Array` instead of `Ptr{Array}`).
-Remove Vulkan types (`VkBool32` to `Bool`, `Cint` to `Integer`, `Cfloat` to `Float32`) that can be converted through `@ccall`.
-
-#### Define constructors
-
-Define constructors which exploit Vulkan patterns for *object instantiation*, *error handling* and *object finalization*.
-
-#### Define convenience functions
-
-Automate patterns like *array fetching*.
-
 ## Patterns
 
 #### Vulkan conventions vs Julia conventions
@@ -35,7 +9,7 @@ Vulkan functions can be renamed in Julia with the snake_case convention
 
 #### Object instantiation
 
-- supply a *create_info* struct
+- supply a *\*CreateInfo* struct
 - call a function to fill an undefined reference with the instantiated object
 
 Directly define a constructor which automatizes the process.
@@ -56,7 +30,7 @@ Wrap the object in a mutable structure, and register the finalization function t
 
 - some functions return a VkResult type, which is an enum type
 
-Create a macro to automatically check the result.
+Create a macro to automatically check the result and raise any errors.
 
 #### Pointer handling
 
@@ -94,6 +68,37 @@ Some array structures can be returned by Vulkan, with two calls to the same func
 
 They should be converted to `String` elements to ease their processing.
 
+## Wrapping features
+
+#### Wrap opaque pointers into structs
+
+Transform opaque pointers defined as `const Ptr{Cvoid}` to a struct with
+
+- a `handle` field (which will store the pointer)
+- instantiation attributes
+- a `deps` field which will accommodate any pointer data that could be used with the pointer and that needs to be valid.
+
+They will adopt the Julia convention, with the "Vk" prefix removed
+
+#### Clean struct fields
+
+Remove unnecessary or initialization arguments (such as custom allocators and array lengths - see *array pointers and counting*).
+Convert pointer fields to regular fields (`String` instead of `Cstring` or `NTuple{256, UInt8}`, `Array` instead of `Ptr{Array}`).
+Remove Vulkan types (`VkBool32` to `Bool`, `Cint` to `Integer`, `Cfloat` to `Float32`) that can be converted through `@ccall`.
+
+#### Define constructors
+
+Define constructors which exploit Vulkan patterns for *object instantiation*, *error handling* and *object finalization*.
+
+#### Define convenience functions
+
+Automate patterns like *array fetching*.
+
+## Wrapping process
+
+1. Remove unnecessary constant types (e.g. `VkBool32`)
+2. Wrap Vulkan handles (`VkInstance`, `VkDevice`...) into structs
+
 # Glossary
 
-checkable function: function which returns a VkResult code to check
+checkable function: function which returns a VkResult code that can be checked

@@ -23,15 +23,27 @@ function fetch_handles(xroot)
     handles_dict = Dict()
     handles = Dict()
     for node ∈ handle_nodes
-        haskey(node, "alias") && continue # skip aliases
-        name = node.firstnode.nextnode.nextnode.content
+        haskey(node, "alias") && continue # skip aliases for now
+        name = member_attr(node, "name")
         parent = haskey(node, "parent") ? node["parent"] : nothing
         is_dispatchable = node.firstnode.content != "VK_DEFINE_NON_DISPATCHABLE_HANDLE"
         handles_dict[name] = (parent, is_dispatchable)
     end
     
     resolve_parent!.(Ref(handles), keys(handles_dict), Ref(handles_dict))
+    resolve_aliases!(handles, handle_nodes)
     handles
 end
 
 const handles = fetch_handles(xroot)
+is_handle(type) = type ∈ (keys(handles)..., "HANDLE")
+
+function fetch_handle_creation_info(xroot)
+    nodes = findall("//command/proto[contains(./child::name, 'vkCreate')]/following-sibling::param[contains(., 'const ')]/child::type[contains(., 'CreateInfo')]", xroot)
+    OrderedDict(node.parentelement.parentelement.lastelement.firstelement.content => (node.parentelement.parentelement.firstelement.firstelement.nextelement.content, node.content, node.nextelement.content) for node ∈ nodes)
+end
+
+handle_creation_info = fetch_handle_creation_info(xroot)
+
+@assert issubset(keys(handle_creation_info), keys(handles))
+@assert collect(keys(handle_creation_info)) == unique(keys(handle_creation_info))

@@ -4,6 +4,7 @@ authors = ["Cédric BELMANT"]
 version = "0.1.0"
 
 [deps]
+AbstractTrees = "1520ce14-60c1-5f80-bbc7-55ef81b5835c"
 DataStructures = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
 EzXML = "8f5d6c58-4d21-5cfd-889c-e3ad7ee6a615"
 JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"

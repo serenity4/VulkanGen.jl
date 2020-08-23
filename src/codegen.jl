@@ -44,12 +44,12 @@ OrderedDict(defs::AbstractArray{T}) where {T <: Declaration} = OrderedDict{Abstr
 generate(cdef::CDefinition) = format_text("const $(cdef.name) = $(cdef.value)")
 function generate(edef::EDefinition)
     bg = edef.with_begin_block
-    format_text("@enum $(edef.name) $(bg ? "begin\n" : "") $(join(edef.fields, bg ? "\n" : " ")) $(bg ? "\nend" : "")")
+    format_text("$(edef.enum_macro) $(typed_field(edef.name, edef.type)) $(bg ? "begin\n" : "") $(join(edef.fields, bg ? "\n" : " ")) $(bg ? "\nend" : "")")
 end
 
 Statement(body::AbstractString) = Statement(strip(body), nothing, [])
 SDefinition(name::AbstractString, is_mutable::Bool; fields=()) = SDefinition(name, is_mutable, OrderedDict(fields))
-Signature(sdef::SDefinition) = Signature(sdef.name, PositionalArgument.(keys(sdef.fields)), KeywordArgument[])
+Signature(sdef::SDefinition) = Signature(sdef.name, PositionalArgument.(keys(sdef.fields), values(sdef.fields)), KeywordArgument[])
 
 function extract_args(str)
     split_str = split(str, ";") # get kwargs first

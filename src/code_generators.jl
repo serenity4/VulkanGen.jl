@@ -114,7 +114,6 @@ function wrap!(fnames, f::FetchArray)
 
     arr"""
     fdef = FD
-
 end
 
 """Wraps a Vulkan pointer argument to a ref.
