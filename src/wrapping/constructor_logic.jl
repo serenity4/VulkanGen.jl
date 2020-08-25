@@ -1,8 +1,13 @@
 function wrap_constructor!(w_api, api, new_sdef, sdef)
-    if is_enumerated_property(sdef) && !is_handle(sdef.name)
+    if is_enumerated_property(sdef) || is_handle(sdef.name)
         add_definition!(w_api, new_sdef, sdef, ConvertVkStructure())
     elseif is_handle(sdef.name)
-        # add_definition!(w_api, new_sdef, sdef, CreateVkHandle())
+        if haskey(handle_creation_info, sdef.name)
+            # create_fun_name, create_info_type_vk = handle_creation_info[sdef.name][1:2]
+            # create_info_sdef = w_api.structs[name_transform(create_info_type_vk, SDefinition)]
+            # create_fun_fdef = api.funcs[resolve_alias(create_fun_name)]
+            # add_definition!(w_api, new_sdef, sdef, CreateVkHandle(); create_info_sdef, create_fun_fdef)
+        end
     else
         add_definition!(w_api, new_sdef, sdef, GenericConstructor())
     end
@@ -65,12 +70,12 @@ is_triggered(pass::Type{T}, args::PassArgs) where {T <: Pass} = is_enabled(pass,
 
 function add_definition!(w_api, new_sdef, sdef, definition::ConversionDefinition; kwargs...)
     def = define_conversion(new_sdef, sdef, definition; kwargs...)
-    push!(w_api.funcs, def)
+    w_api.funcs[(is_handle(sdef.name) ? "convert_handle" : "convert") * "_$(sdef.name)"] = def
 end
 
 function add_definition!(w_api, new_sdef, sdef, definition::ConstructorDefinition; kwargs...)
     def = define_constructor(new_sdef, sdef, definition; kwargs...)
-    push!(w_api.funcs, def)
+    w_api.funcs[def.name] = def
 end
 
 function define_constructor(new_sdef, sdef, definition::GenericConstructor)
@@ -88,21 +93,25 @@ function define_constructor(new_sdef, sdef, definition::GenericConstructor)
 end
 
 function define_conversion(new_sdef, sdef, ::ConvertVkStructure)
+    is_handle(sdef.name) && (f = FDefinition("Base.convert(T::Type{$(new_sdef.name)}, vk_handle::$(sdef.name)) = $(new_sdef.name)(vk_handle)"); println(generate(f)) ; return f)
     define_conversion(new_sdef, sdef, [TranslateVkTypes()])
 end
 
-function define_constructor(new_sdef, sdef, ::CreateVkHandle; create_info_sdef, create_fun_sig)
+function define_constructor(new_sdef, sdef, ::CreateVkHandle; create_info_sdef, create_fun_fdef)
+    create_info_var = last(handle_creation_info[sdef.name])
+    create_fun_sig = create_fun_fdef.signature
     kwargs_info, _ = parameters_from_fields(create_info_sdef)
     args_info = arguments_from_fields(create_info_sdef)
     kwargs = [kwargs_info..., KeywordArgument("pAllocator", "C_NULL")]
     new_sig = Signature(new_sdef.name, args_info, kwargs)
     create_info_sig = Signature(create_info_sdef)
     name = nc_convert(SnakeCaseLower, sdef.name)
-    create_func = handle_creation_info[sdef.name][1]
+    body = []
     push!(body, Statement("$name = Ref{$(sdef.name)}()", name, []))
-    push!(body, Statement("create_info = $create_info_sig", "create_info", argnames(create_info_sig)))
-    push!(body, Statement("$create_func", nothing, argnames(create_info_sig)))
-    push!(body, Statement("$(new_sdef.name)("))
+    push!(body, Statement("$create_info_var = $(create_info_sig.name)($(join_args(argnames(create_info_sig))))", nothing, argnames(create_info_sig)))
+    push!(body, Statement("@check $(create_fun_sig.name)($(join_args(argnames(create_fun_sig))))", nothing, argnames(create_fun_sig)))
+    # push!(body, Statement("Base.finalize($create_fun_sig", nothing, argnames(create_info_sig)))
+    push!(body, Statement("$(new_sdef.name)($name[], $(argnames(create_info_sig))", nothing, [name, argnames(create_info_sig)...]))
     FDefinition(new_sig.name, new_sig, false, body)
 end
 
@@ -114,7 +123,7 @@ function accumulate_passes(sdef, passes; use_all_args=true)
     @assert unique(typeof.(passes)) == typeof.(passes) "A Pass type cannot be provided more than once"
     for (name, type) ∈ zip(argnames(vk_sig), argtypes(vk_sig))
         counted_arg = cardinality(name, sdef.name)
-        pass_args = PassArgs(name, type, fieldname_transform(name, type), fieldtype_transform(name, type, Dict()), sdef, counted_arg, last_argname(body, name, type), Dict(typeof.(passes) .=> false))
+        pass_args = PassArgs(name, type, fieldname_transform(name, type), fieldtype_transform(name, type), sdef, counted_arg, last_argname(body, name, type), Dict(typeof.(passes) .=> false))
         for el ∈ passes
             pass_func = hasfield(typeof(el), :pass!) ? el.pass! : pass! # prioritize preprocessed pass inside struct
             body_statements = pass_func(pass_args, typeof(el))
@@ -128,7 +137,7 @@ function accumulate_passes(sdef, passes; use_all_args=true)
             pass_args.last_name = last_argname(body, name, type)
             pass_results[name][typeof(el)] = PassResult(el, pass_args, is_triggered(typeof(el), pass_args))
         end
-        !any(values(pass_args.passes)) && use_all_args && push!(init_args, name)
+        !any(values(pass_args.passes)) && use_all_args && push!(init_args, pass_args.last_name)
     end
     init_args, body, pass_results
 end

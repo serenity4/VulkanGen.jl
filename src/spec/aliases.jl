@@ -5,24 +5,42 @@ function fetch_aliases(xroot)
     )
 end
 
-const aliases = fetch_aliases(xroot)
+function build_alias_graph(alias_verts, aliases_dict)
+    g = SimpleDiGraph(length(alias_verts))
+
+    for (j, vert) ∈ enumerate(alias_verts)
+        !haskey(aliases_dict, vert) && continue
+        dest_vert = aliases_dict[vert]
+        i = findfirst(dest_vert .== alias_verts)
+        add_edge!(g, i, j)
+    end
+    g
+end
+
+const aliases_dict = fetch_aliases(xroot)
+const aliases_dict_rev = OrderedDict(v => k for (k, v) ∈ aliases_dict)
 
 """
 Whether this name is an alias.
 """
-isalias(name) = name ∈ keys(aliases)
+isalias(name) = name ∈ keys(aliases_dict)
 
 """
 Whether an alias was built from this name.
 """
-isaliased(name) = name ∈ values(aliases)
+hasalias(name) = name ∈ values(aliases_dict)
 
-"""
-Target of an alias.
-"""
-alias(al) = aliases[al]
+alias_verts = unique(vcat(keys(aliases_dict)..., values(aliases_dict)...))
 
-"""
-Take the non-alias value corresponding to this name. No effect is the name is not an alias. Correctly follows any alias chain.
-"""
-resolve_alias(name) = isalias(name) ? resolve_alias(alias(name)) : name
+g = build_alias_graph(alias_verts, aliases_dict)
+
+aliases(g::SimpleDiGraph, index) = getindex.(Ref(alias_verts), outneighbors(g, index))
+aliases(name) = (index = findfirst(alias_verts .== name); isnothing(index) ? error("Name $name not found") : aliases(g, index))
+
+follow_alias(g::SimpleDiGraph, index) = getindex.(Ref(alias_verts), inneighbors(g, index))
+follow_alias(name) = (index = findfirst(alias_verts .== name); isnothing(index) ? error("Name $name not found") : follow_alias(g, index))
+
+# for el ∈ topological_sort_by_dfs(g)
+#     elname = alias_verts[el]
+#     println("$(lpad("$elname ($el)", 120)) => $(isalias(elname) ? "ALIAS" : "NOALIAS")")
+# end

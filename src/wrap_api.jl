@@ -4,7 +4,6 @@ mutable struct WrappedAPI
     funcs
     consts
     enums
-    converted_types
 end
 
 # not efficient
@@ -14,35 +13,16 @@ Base.show(io::IO, w_api::WrappedAPI) = print(io, "Wrapped API with $(length(w_ap
 
 abstract type Wrapper end
 
-default_filename(::Type{SDefinition}) = "structs.jl"
-default_filename(::Type{FDefinition}) = "functions.jl"
-default_filename(::Type{CDefinition}) = "globals.jl"
-default_filename(::Type{EDefinition}) = "globals.jl"
-
 default_spacing(::SDefinition) = "\n"^2
 default_spacing(decl::FDefinition) = decl.short ? "\n" : "\n"^2
 default_spacing(::CDefinition) = "\n"
 default_spacing(::EDefinition) = "\n"
 
-function write_api(io::IO, def::SDefinition; w_api::WrappedAPI, spacing, kwargs...)
-    write(io, generate(def; kwargs...) * spacing(def))
-    if isalias(def.name)
-        const_alias = w_api.consts[alias(def.name)]
-        write_api(io, generate(const_alias) * spacing(const_alias))
-    end
-end
+unsolved_dependencies(sdef, decls) = collect(values(decls)[findall(keys(decl) .== setdiff(type_dependencies(sdef), keys(decls)))])
+are_dependencies_solved(def, decls) = isempty(unsolved_dependencies(def, decls))
 
-function write_api(io::IO, def::Declaration; spacing, kwargs...)
+function write_api!(io::IO, def::Declaration; spacing, kwargs...)
     write(io, generate(def; kwargs...) * spacing(def))
-end
-
-"""
-Write a const definition on the condition that it is not a struct alias, because any such alias is already written along with the aliased struct definition.
-"""
-function write_api(io::IO, def::CDefinition; w_api, spacing, kwargs...)
-    if !(isaliased(def.name) && def.name ∈ keys(w_api.structs))
-        write(io, generate(def, kwargs...) * spacing(def))
-    end
 end
 
 """Write a wrapped API to files in dest_dir.
@@ -50,51 +30,21 @@ end
 Spacing options can be controlled by providing the corresponding argument with a function.
 Files that are written to can be controlled by providing the filename argument with a function.
 """
-function Base.write(w_api::WrappedAPI, dest_dir; spacing=default_spacing, filename=default_filename, check=true)
-    for defs ∈ collect.(values.([w_api.consts, w_api.enums, w_api.structs, w_api.funcs]))
-        dest = filename(eltype(defs))
-        kwargs = eltype(defs) == FDefinition ? (check_identifiers = check,) : eltype(defs) ∈ [CDefinition, SDefinition] ? (w_api=w_api,) : ()
-        destfile = joinpath(dest_dir, dest)
-        open(destfile, "w+") do io
-            write_api.(Ref(io), defs; spacing, kwargs...)
+function Base.write(w_api::WrappedAPI, destfile; spacing=default_spacing, check=true)
+    decls = OrderedDict((vcat(w_api.consts, w_api.enums, w_api.structs)...)...)
+    decls_order = resolve_dependencies(decls)
+    check_dependencies(decls, decls_order)
+    open(destfile, "w+") do io; nothing end
+    for decl ∈ Iterators.flatten((getindex.(Ref(decls), decls_order), values(w_api.funcs)))
+        kwargs = typeof(decl) == FDefinition ? (check_identifiers = check,) : ()
+        open(destfile, "a+") do io
+            write_api!(io, decl; spacing, kwargs...)
         end
-        format(destfile)
     end
+    format(destfile)
+    nothing
 end
 
-struct Converted
-    initial_type
-    final_type
-end
-
-type_conversions = Dict(
-    "Cstring" => "Cstring",
-    "Float32" => "Float32",
-    "Float64" => "Float64",
-    "Int32" => "Int32",
-    "Int64" => "Int64",
-    "Nothing" => "Nothing",
-    "Ptr{Nothing}" => "Ptr{Nothing}",
-    "UInt16" => "UInt16",
-    "UInt32" => "UInt32",
-    "UInt64" => "UInt64",
-    "UInt8" => "UInt8",
-    "Cdouble" => "Float64",
-    "Cfloat" => "Float32",
-    "Cint" => "Int32",
-    "Csize_t" => "UInt",
-    "Cssize_t" => "Int",
-    "Cstring" => "String",
-    "Cuint" => "UInt32",
-    "VkBool32" => "Bool",
-    "Ptr{Cstring}" => "Union{<: AbstractArray, Ptr{Cvoid}}",
-    "NTuple{256, UInt8}" => Converted("NTuple{256, UInt8}", "String"),
-    "NTuple{16, UInt8}" => Converted("NTuple{256, UInt8}", "String"),
-    "Ptr{Cvoid}" => "Ptr{Cvoid}",
-)
-
-
-is_opaque_ptr(ptr) = ptr == Ptr{Nothing}
 stype_splice(fdef) = getproperty(vk, Symbol(stypes[fdef.name]))
 name_transform(decl::Declaration) = name_transform(decl.name, typeof(decl))
 
@@ -109,8 +59,14 @@ include("wrapping/constructor_logic.jl")
 include("wrapping/function_logic.jl")
 
 function wrap!(w_api::WrappedAPI, api::API)
+    sdefs = collect(values(api.structs))
+    sdef_handles = filter(x -> is_handle(x.name), sdefs)
+    sdef_enumerated_properties = filter(is_enumerated_property, sdefs)
+    other_structs = setdiff(sdefs, union(sdef_handles, sdef_enumerated_properties))
     errors = OrderedDict()
-    wrap!(w_api, api, values(api.structs), errors)
+    wrap!(w_api, api, other_structs, errors)
+    wrap!(w_api, api, sdef_enumerated_properties, errors)
+    wrap!(w_api, api, sdef_handles, errors)
     wrap!(w_api, api, values(api.funcs), errors)
     wrap!(w_api, api, values(api.consts), errors)
     wrap!(w_api, api, values(api.enums), errors)
@@ -123,29 +79,30 @@ end
 
 function wrap!(w_api, api, objects, errors)
     for obj ∈ objects
-        if !isknown(obj, w_api.converted_types)
-            try
-                wrap!(w_api, api, obj)
-            catch e
-                msg = hasproperty(e, :msg) ? e.msg : "$(typeof(e))"
-                errors[obj.name] = msg
-                println("\e[31;1;1m$(obj.name): $msg\e[m")
-                rethrow(e)
-                typeof(e) ∈ [ErrorException, AssertionError] ? continue : rethrow(e)
-            end
+        try
+            wrap!(w_api, api, obj)
+        catch e
+            msg = hasproperty(e, :msg) ? e.msg : "$(typeof(e))"
+            errors[obj.name] = msg
+            println("\e[31;1;1m$(obj.name): $msg\e[m")
+            rethrow(e)
+            typeof(e) ∈ [ErrorException, AssertionError] ? continue : rethrow(e)
         end
     end
 end
 
 function wrap!(w_api, api, edef::EDefinition)
-    push!(w_api.enums, edef)
+    new_edef = EDefinition(remove_vk_prefix(edef.name), remove_vk_prefix.(edef.fields), edef.with_begin_block, isnothing(edef.type) ? nothing : remove_vk_prefix(edef.type), edef.enum_macro)
+    w_api.enums[new_edef.name] = new_edef
+    w_api.funcs["convert_$(edef.name)"] = FDefinition("Base.convert(T::Type{$(new_edef.name)}, e::$(edef.name)) = T(UInt(e))")
 end
 
 function wrap!(w_api, api, cdef::CDefinition)
-    push!(w_api.consts, cdef)
+    new_cdef = CDefinition(remove_vk_prefix(cdef.name), is_literal(cdef.value) ? cdef.value : remove_vk_prefix(cdef.value))
+    w_api.consts[new_cdef.name] = new_cdef
 end
 
 function wrap(api::API)
-    w_api = WrappedAPI(api.source, SDefinition[], FDefinition[], CDefinition[], EDefinition[], Dict())
+    w_api = WrappedAPI(api.source, OrderedDict{String, SDefinition}(), OrderedDict{String, FDefinition}(), OrderedDict{String, CDefinition}(), OrderedDict{String, EDefinition}())
     wrap!(w_api, api)
 end

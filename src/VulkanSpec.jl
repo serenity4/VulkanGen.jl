@@ -2,6 +2,7 @@ module VulkanSpec
 
 using EzXML
 using DataStructures
+using LightGraphs
 
 xdoc = readxml(joinpath(@__DIR__, "spec", "vk.xml"))
 xroot = xdoc.root
@@ -24,8 +25,10 @@ export aliases,
     is_handle,
     handle_creation_info,
     isalias,
+    hasalias,
     alias,
-    isaliased,
-    resolve_alias
+    follow_alias,
+    aliases_dict,
+    aliases_dict_rev
 
 end # module

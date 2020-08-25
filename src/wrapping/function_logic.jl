@@ -10,7 +10,7 @@ function wrap!(w_api, api, fdef::FDefinition)
             # new_fdef = FDefinition(name, Signature(name, args, kwargs), fdef.short, body)
         new_fdef = FDefinition(name, Signature(name, fdef.signature.args, fdef.signature.kwargs), fdef.short, [Statement(replace(body[1].body, "PFN" => "vk.PFN"))])
     end
-    push!(w_api.funcs, new_fdef)
+    w_api.funcs[new_fdef.name] = new_fdef
 end
 
 
@@ -41,7 +41,12 @@ function wrap_enumeration_command(fdef)
         Statement("@check $(fdef.name)($(join_args([argnames(sig)..., "count", "C_NULL"])))", "count", []),
         Statement("arr = Array{$(enumerated_type)}(undef, count[])", "arr", ["count"]),
         Statement("@check $(fdef.name)($(join_args([argnames(sig)..., "count", "arr"])))", nothing, [argnames(sig)..., "count", "arr"]),
-        Statement(is_handle(enumerated_type) ? "arr" : "Base.convert.(Ref($(name_transform(enumerated_type, SDefinition))), arr)", nothing, ["arr"]),
+        Statement(is_handle(enumerated_type) || enumerated_type == "void" ? "arr" : "Base.convert.(Ref($(name_transform(enumerated_type, SDefinition))), arr)", nothing, ["arr"]),
     ]
     FDefinition(name, sig, false, body)
+end
+
+function type_dependencies(fdef::FDefinition)
+    types = filter(!isnothing, argtypes(fdef.signature))
+    isempty(types) ? String[] : unique(vcat(type_dependencies.(types))...)
 end

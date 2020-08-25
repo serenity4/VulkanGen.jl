@@ -61,10 +61,10 @@ end
 function FDefinition(str::AbstractString)
     short = !startswith(str, "function")
     if short
-        id, args, body = match(r"(\w+)\((.*)\)\s+=(?!=)(.*)$", str).captures
+        id, args, body = match(r"([\w\.]+)\((.*)\)\s+=(?!=)(.*)$", str).captures
         body = [Statement(body)]
     else
-        id, args = match(r"function (\w+)\((.*)\)", str).captures
+        id, args = match(r"function ([\w\.]+)\((.*)\)", str).captures
         body = Statement.(split(str, "\n")[2:end - 1]) # remove function... and end lines
     end
     if occursin(";", args)

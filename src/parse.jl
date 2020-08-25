@@ -64,7 +64,7 @@ end
 
 function convert_constptr_to_struct!(api)
     for cdef ∈ values(api.consts)
-        if is_opaque_ptr(api.eval(cdef.value)) && !startswith(cdef.name, "PFN") # ignore function pointers
+        if is_opaque(api.eval(cdef.value)) && !startswith(cdef.name, "PFN") # ignore function pointers
             sdef = parse_ptr(cdef.name)
             api.structs[sdef.name] = sdef
         end
