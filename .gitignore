@@ -3,5 +3,3 @@
 JuliaSysimage.so
 Manifest.toml
 *.code-workspace
-registry.rnc
-vk.xml
