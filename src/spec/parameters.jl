@@ -67,4 +67,4 @@ function fetch_optional_parameters(xroot)
     group_optional_parameters(optional_parameters)
 end
 
-const optional_parameters = fetch_optional_parameters(xroot)
+const optional_parameters_dict = fetch_optional_parameters(xroot)
