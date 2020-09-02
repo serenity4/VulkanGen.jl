@@ -1,9 +1,18 @@
 function wrap!(w_api, api, sdef::SDefinition)
-    new_sdef = wrap_struct!(w_api, api, sdef)
+    new_sdef = structure(sdef)
+    wrap_structure!(w_api, new_sdef)
     wrap_constructor!(w_api, api, new_sdef, sdef)
 end
 
-function wrap_struct!(w_api::WrappedAPI, api, sdef)
+function wrap_structure!(w_api, new_sdef)
+    if new_sdef.name ∉ keys(w_api.structs)
+        w_api.structs[new_sdef.name] = new_sdef # add to wrapped structs
+    else
+        @warn "Wrapping type $(sdef.name) but was already processed"
+    end
+end
+
+function structure(sdef)
     new_fields = OrderedDict()
     if is_handle(sdef.name)
         handle = sdef.name
@@ -24,13 +33,7 @@ function wrap_struct!(w_api::WrappedAPI, api, sdef)
         end
     end
     new_name = name_transform(sdef)
-    new_sdef = SDefinition(new_name, any(isa.(Finalizer, typeof.(patterns(sdef)))), new_fields)
-    if new_sdef.name ∉ keys(w_api.structs)
-        w_api.structs[new_sdef.name] = new_sdef # add to wrapped structs
-    else
-        @warn "Wrapping type $(sdef.name) but was already processed"
-    end
-    new_sdef
+    SDefinition(new_name, any(isa.(Finalizer, typeof.(patterns(sdef)))), new_fields)
 end
 
 convention_exceptions = Dict(
@@ -42,12 +45,12 @@ convention_exceptions = Dict(
 
 const lib_prefix = "VulkanCore.LibVulkan"
 # parameters to keep in a constructor rather than in a struct
-const parameters = Dict(
+const parameters_dict = Dict(
     "pNext" => KeywordArgument("next", "C_NULL"),
     "flags" => KeywordArgument("flags", "0"),
     "pAllocator" => KeywordArgument("pAllocator", "C_NULL"),
 )
-const dropped_fields = collect(Iterators.flatten((keys(parameters), keys(spliced_args))))
+const dropped_fields = collect(Iterators.flatten((keys(parameters_dict), keys(spliced_args))))
 
 instance_name(sdef) = convert(SnakeCaseLower, sdef.name)
 
@@ -90,7 +93,7 @@ function fieldtype_transform(name, type)
     is_ntuple(type) && inner_type(type) == "UInt8" && return Converted(type, "String")
     @return_value_if_key_exists type_conversions type
     is_vulkan_type(type) && return remove_vk_prefix(type)
-    isnothing(type) && return "Any"
+    (isnothing(type) || type == "Any") && return "Any"
     convert_nested_type(type)
 end
 

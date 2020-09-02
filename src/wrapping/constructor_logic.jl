@@ -1,26 +1,77 @@
-function wrap_constructor!(w_api, api, new_sdef, sdef)
+function constructor(api, new_sdef, sdef)
+    defs, keys = [], []
     if is_enumerated_property(sdef) || is_handle(sdef.name)
-        add_definition!(w_api, new_sdef, sdef, ConvertVkStructure())
-    elseif is_handle(sdef.name)
-        if haskey(handle_creation_info, sdef.name)
-            # create_fun_name, create_info_type_vk = handle_creation_info[sdef.name][1:2]
-            # create_info_sdef = w_api.structs[name_transform(create_info_type_vk, SDefinition)]
-            # create_fun_fdef = api.funcs[resolve_alias(create_fun_name)]
-            # add_definition!(w_api, new_sdef, sdef, CreateVkHandle(); create_info_sdef, create_fun_fdef)
+        push!(defs, conversion(api, new_sdef, sdef, ConvertVkStructure()))
+    end
+    if !is_enumerated_property(sdef)
+
+        if is_handle(sdef.name) && "CreateInfo" ∈ argnames(Signature(sdef))
+            cons = constructor(api, new_sdef, sdef, ConstructorWithCreateInfo())
+        else
+            cons = constructor(api, new_sdef, sdef, GenericConstructor())
+        end
+        push!(defs, cons)
+    end
+    defs, constructor_key.(Ref(sdef), is_conversion.(defs))
+end
+
+function constructor_key(sdef, is_conversion)
+    fname = sdef.name
+    if is_conversion
+        if is_handle(fname)
+            "convert_handle_" * fname
+        else
+            "convert_" * fname
         end
     else
-        add_definition!(w_api, new_sdef, sdef, GenericConstructor())
+        fname
+    end
+end
+
+function wrap_constructor!(w_api, api, new_sdef, sdef)
+    defs, keys = constructor(api, new_sdef, sdef)
+    for (def, key) ∈ zip(defs, keys)
+        w_api.funcs[key] = def
     end
 end
 
 """
-Pass type used to build the body of a function
+Pass type used to build the body of a function.
+
+For each field of a structure, passes are layed out on top of one another to construct statements, that will define a major part of a constructor function body. All passes operate from a common set of parameters bundled in a PassArgs structure.
+
+Passes that are triggered upon a field yield one or more statements.
 """
 abstract type Pass end
-struct TranslateVkTypes <: Pass end
 struct TranslateVkTypesBack <: Pass end
 struct ComputeLengthArgument <: Pass end
 struct ReplaceStructureType <: Pass end
+@preprocess_pass struct AutomateCreateInfo <: Pass
+    create_info_sdef
+    create_info_new_sdef
+    pass!
+end
+
+@preprocess_pass struct TranslateVkTypes <: Pass
+    converted_arg_namespace
+    pass!
+end
+
+@preprocess_pass struct TakeConversionArgsFromVkVar <: Pass
+    vk_var_name
+    pass!
+end
+
+@preprocess_pass struct DefineSelfPointers <: Pass
+    new_sdef
+    pass!
+end
+struct GeneratePointers <: Pass end
+
+@preprocess_pass struct AddDefaults <: Pass
+    opt_params
+    pass!
+end
 
 @with_kw mutable struct PassArgs
     name
@@ -39,48 +90,34 @@ struct PassResult{T <: Pass}
     is_triggered::Bool
 end
 
-@preprocess_pass struct DefineSelfPointers <: Pass
-    new_sdef
-    pass!
-end
-struct GeneratePointers <: Pass end
-
-@preprocess_pass struct AddDefaults <: Pass
-    opt_params
-    pass!
-end
-
 # take the vulkan ID symbol if assigned, else take the julian ID symbol e.g. if pAllocator is assigned to the julian name p_allocator then return pAllocator; else, return p_allocator
 last_argname(body, vk_id, vk_type) = vk_id ∈ getproperty.(body, :assigned_id) ? vk_id : fieldname_transform(vk_id, vk_type)
 
 abstract type ConstructorDefinition end
-struct ConvertVkStructureConstructor <: ConstructorDefinition end
 struct GenericConstructor <: ConstructorDefinition end
 struct CreateVkHandle <: ConstructorDefinition end
+struct ConstructorWithCreateInfo <: ConstructorDefinition end
 
 abstract type ConversionDefinition end
 struct ConvertVkStructure <: ConversionDefinition end
 
+is_conversion(def) = startswith("Base.convert", def.name)
+
+
 
 preprocess_pass(pass_type::Type{T}; kwargs...) where {T <: Pass} = (pass_args, T) -> pass!(pass_args, T; kwargs...)
-annotate_pass(statements, pass) = (body_statements = getproperty.(statements, :body); Statement.(rstrip.(body_statements, '\n') .* "    # $(typeof(pass).name)" .* map(x -> endswith(x, "\n") ? "\n" : "", body_statements), getproperty.(statements, :assigned_id), getproperty.(statements, :evaluated_ids)))
+
+function annotate_pass(statements, pass)
+    body_statements = getproperty.(statements, :body)
+    Statement.(rstrip.(body_statements, '\n') .* "    # $(typeof(pass).name)" .* map(x -> endswith(x, "\n") ? "\n" : "", body_statements), getproperty.(statements, :assigned_id), getproperty.(statements, :evaluated_ids))
+end
+
 is_enabled(pass::Type{T}, args::PassArgs) where {T <: Pass} = any(isa.(Ref(T), keys(args.passes)))
 is_triggered(pass::Type{T}, args::PassArgs) where {T <: Pass} = is_enabled(pass, args) && args.passes[pass]
 
-
-function add_definition!(w_api, new_sdef, sdef, definition::ConversionDefinition; kwargs...)
-    def = define_conversion(new_sdef, sdef, definition; kwargs...)
-    w_api.funcs[(is_handle(sdef.name) ? "convert_handle" : "convert") * "_$(sdef.name)"] = def
-end
-
-function add_definition!(w_api, new_sdef, sdef, definition::ConstructorDefinition; kwargs...)
-    def = define_constructor(new_sdef, sdef, definition; kwargs...)
-    w_api.funcs[def.name] = def
-end
-
-function define_constructor(new_sdef, sdef, definition::GenericConstructor)
-    kwargs, opt_params = parameters_from_fields(sdef)
-    args = filter(x -> x.name ∉ ["vk", getproperty.(kwargs, :name)...], arguments_from_fields(new_sdef))
+function constructor(api, new_sdef, sdef, definition::GenericConstructor)
+    kwargs, opt_params = parameters(api, sdef)
+    args = filter(x -> x.name ∉ ["vk", getproperty.(kwargs, :name)...], arguments(api, sdef))
     vk_sig = Signature(sdef)
     init_args, body, pass_results = accumulate_passes(sdef, [AddDefaults(opt_params), TranslateVkTypesBack(), ComputeLengthArgument(), ReplaceStructureType(), DefineSelfPointers(new_sdef), GeneratePointers()])
     default_co_sig = Signature(new_sdef)
@@ -92,15 +129,10 @@ function define_constructor(new_sdef, sdef, definition::GenericConstructor)
     FDefinition(new_sdef.name, co_sig, length(body) == 1, body)
 end
 
-function define_conversion(new_sdef, sdef, ::ConvertVkStructure)
-    is_handle(sdef.name) && (f = FDefinition("Base.convert(T::Type{$(new_sdef.name)}, vk_handle::$(sdef.name)) = $(new_sdef.name)(vk_handle)"); println(generate(f)) ; return f)
-    define_conversion(new_sdef, sdef, [TranslateVkTypes()])
-end
-
-function define_constructor(new_sdef, sdef, ::CreateVkHandle; create_info_sdef, create_fun_fdef)
+function constructor(api, new_sdef, sdef, ::CreateVkHandle; create_info_sdef, create_fun_fdef)
     create_info_var = last(handle_creation_info[sdef.name])
     create_fun_sig = create_fun_fdef.signature
-    kwargs_info, _ = parameters_from_fields(create_info_sdef)
+    kwargs_info, _ = parameters(create_info_sdef)
     args_info = arguments_from_fields(create_info_sdef)
     kwargs = [kwargs_info..., KeywordArgument("pAllocator", "C_NULL")]
     new_sig = Signature(new_sdef.name, args_info, kwargs)
@@ -142,32 +174,24 @@ function accumulate_passes(sdef, passes; use_all_args=true)
     init_args, body, pass_results
 end
 
-function define_conversion(new_sdef, sdef, passes)
-    new_sig = Signature("Base.convert", [PositionalArgument("T", "Type{$(new_sdef.name)}"), PositionalArgument("vk_struct", sdef.name)], [])
-    init_args, body, pass_results = accumulate_passes(sdef, passes, use_all_args=false)
-    for (i, arg) ∈ enumerate(argnames(Signature(sdef)))
-        if arg ∉ init_args
-            insert!(init_args, i, "vk_struct.$arg")
-        end
-    end
-    push!(body, Statement("$(new_sdef.name)($(join_args(init_args)))", nothing, join_args(init_args)))
-    FDefinition(new_sdef.name, new_sig, false, body)
+function conversion(api, new_sdef, sdef, ::ConvertVkStructure)
+    var = "vk_struct"
+    conversion(api, new_sdef, sdef, [TranslateVkTypes(var), TakeConversionArgsFromVkVar(var)], var)
 end
 
-function define_constructor(new_sdef, sdef, ::ConvertVkStructureConstructor)
-    define_constructor(new_sdef, sdef, [TranslateVkTypes()])
-end
-
-function define_constructor(new_sdef, sdef, passes)
+function conversion(api, new_sdef, sdef, passes, converted_var_name)
     init_args = []
-    new_sig = Signature(new_sdef.name, [PositionalArgument("vk_struct", sdef.name)], [])
+    fname = "Base.convert"
+    args = PositionalArgument.(["T::Type{$(new_sdef.name)}", "$converted_var_name::$(sdef.name)"])
+    new_sig = Signature(fname, args, [])
     init_args, body, pass_results = accumulate_passes(sdef, passes)
     push!(body, Statement("$(new_sdef.name)($(join_args(init_args)))", nothing, join_args(init_args)))
-    FDefinition(new_sdef.name, new_sig, false, body)
+    FDefinition(fname, new_sig, false, body)
 end
 
-function pass!(args::PassArgs, ::Type{TranslateVkTypes})
+function pass!(args::PassArgs, ::Type{TranslateVkTypes}; converted_arg_namespace)
     @unpack new_type, new_name, name = args
+    converted_arg = isnothing(converted_arg_namespace) ? name : "$converted_arg_namespace.$name"
     new_type isa Converted && return Statement("$name = convert_vk($(new_type.final_type), vk_struct.$name)", name, "vk_struct.$name")
 end
 
@@ -220,24 +244,62 @@ function pass!(args::PassArgs, ::Type{GeneratePointers})
     nothing
 end
 
-function parameters_from_fields(sdef)
+function pass!(args::PassArgs, ::Type{AutomateCreateInfo})
+    @unpack type, name, new_name, sdef = args
+    if occursin("CreateInfo", name)
+        Statement("create_info = 1", "create_info", [])
+    end
+end
+
+function pass!(args::PassArgs, ::Type{TakeConversionArgsFromVkVar}; vk_var_name)
+    @unpack passes, name, new_name, last_name = args
+    assigned_name = "$vk_var_name.$name"
+    !any(values(passes)) && return Statement("$name = $assigned_name", name, [assigned_name])
+end
+
+function parameters(api, sdef::SDefinition)
+    global parameters_dict
+    optional_parameters_dict = VulkanSpec.optional_parameters_dict
     kwargs = KeywordArgument[]
     params = Dict()
     for (name, type) ∈ sdef.fields
-        !isnothing(cardinality(name, sdef.name)) && continue
-        if name ∈ keys(parameters)
-            kwarg = parameters[name]
-            push!(kwargs, kwarg)
-        elseif sdef.name ∈ keys(optional_parameters)
-            opt_params = optional_parameters[sdef.name]
-            index = findfirst(x -> first(x) == name, opt_params)
-            if !isnothing(index)
-                kwarg = KeywordArgument(fieldname_transform(name, type), "nothing") # real default value selection happens in the constructor body
-                params[name] = kwarg => last(opt_params[index])
+        if occursin("CreateInfo", name) && occursin("CreateInfo", type) && !is_ptr(type)
+            append!(kwargs, parameters(api, constructor(api.structs[type])))
+        else
+            !isnothing(cardinality(name, sdef.name)) && continue
+            if name ∈ keys(parameters_dict)
+                kwarg = parameters_dict[name]
+                push!(kwargs, kwarg)
+            elseif sdef.name ∈ keys(optional_parameters_dict)
+                opt_params = optional_parameters_dict[sdef.name]
+                index = findfirst(x -> first(x) == name, opt_params)
+                if !isnothing(index)
+                    kwarg = KeywordArgument(fieldname_transform(name, type), "nothing") # real default value selection happens in the constructor body, to avoid having C_NULL arguments exposed to the user
+                    params[name] = kwarg => last(opt_params[index])
+                end
             end
         end
     end
     kwargs = [first.(values(params))..., kwargs...]
     kwargs, params
 end
-arguments_from_fields(sdef) = PositionalArgument.(collect(keys((sdef.fields))))
+
+function is_parameter(argname, api, sdef)
+    kwargs, _ = parameters(api, sdef)
+    argname ∈ getproperty.(kwargs, :name)
+end
+
+function arguments(api, sdef::SDefinition)
+    args = PositionalArgument[]
+    for (name, type) ∈ sdef.fields
+        discard_field(name, type, sdef) && continue
+        is_parameter(name, api, sdef) && continue
+        new_name, new_type = field_transform(name, type)
+        if occursin("CreateInfo", name) && occursin("CreateInfo", type) && !is_ptr(type)
+            append!(args, arguments(api, api.structs[type])) # get arguments from the create_info struct
+        else
+            push!(args, PositionalArgument(new_name, new_type))
+        end
+    end
+    args
+end

@@ -43,3 +43,4 @@ pointer_length(p) = p == C_NULL || isempty(p) ? 0 : length(p)
 convert_vk(::Type{T}, str::NTuple{N,UInt8}) where {N,T <: AbstractString} = T(filter(x -> x != 0, UInt8[str...]))
 convert_vk(::Type{VersionNumber}, version::UInt32) = VersionNumber(UInt32(version) >> 22, (UInt32(version) >> 12) & 0x3ff, UInt32(version) & 0xfff)
 convert_vk_back(::Type{UInt32}, version::VersionNumber) = (version.major << 22) + (version.minor << 12) + version.patch
+convert_vk_back(T::Type{NTuple{N,UInt8}}, s::String) where {N} = T(s * "\0" ^ (N - length(s)))
