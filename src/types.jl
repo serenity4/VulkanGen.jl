@@ -60,6 +60,7 @@ type_conversions = Dict(
     "NTuple{16, UInt8}" => "String",
     "Ptr{Cvoid}" => "Ptr{Cvoid}",
     "Cvoid" => "Cvoid",
+    "Ptr{Cfloat}" => "AbstractArray{<: Number}",
 )
 
 base_types = [
@@ -88,8 +89,17 @@ base_types = [
     "Cstring",
     "Cvoid",
     "<:AbstractArray",
-    "VersionNumber"
+    "VersionNumber",
+    "<:Number",
 ]
+
+function widen_type(type)
+    stype = supertype(eval(Meta.parse(type)))
+    stype <: Integer && return Integer
+    stype <: AbstractFloat && return Number
+    stype <: AbstractString && return AbstractString
+    stype
+end
 
 is_ptr_to_ptr(type) = startswith(type, "Ptr{Ptr{")
 is_ptr(type) = startswith(type, "Ptr{")

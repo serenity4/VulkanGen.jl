@@ -234,10 +234,11 @@ function pass!(args::PassArgs, ::Type{DefineSelfPointers}; new_sdef)
 end
 
 function pass!(args::PassArgs, ::Type{GeneratePointers})
-    @unpack type, name, new_name, last_name = args
+    @unpack type, name, new_name, new_type, last_name = args
     if !is_triggered(DefineSelfPointers, args) && startswith(name, "p")
         type == "Ptr{Cstring}" && (arg_check = "isempty($last_name)"; return Statement("$name = $arg_check ? C_NULL : pointer(pointer.($last_name))", name, [last_name]))
         type == "Cstring" && (arg_check = "$last_name == C_NULL"; return Statement("$name = $arg_check ? C_NULL : pointer($last_name)", name, [last_name]))
+        startswith(new_type, "AbstractArray") && return Statement("$name = isempty($last_name) ? C_NULL : pointer($last_name)", name, [last_name])
         refname = "$(last_name)_ref"
         return Statement("$name = $last_name == C_NULL ? C_NULL : ($refname = Ref($last_name.vk); preserve($refname, $new_name); unsafe_pointer($refname))", name, [last_name, new_name])
     end
@@ -298,7 +299,7 @@ function arguments(api, sdef::SDefinition)
         if occursin("CreateInfo", name) && occursin("CreateInfo", type) && !is_ptr(type)
             append!(args, arguments(api, api.structs[type])) # get arguments from the create_info struct
         else
-            push!(args, PositionalArgument(new_name, new_type))
+            push!(args, PositionalArgument(new_name, new_type ∈ base_types ? widen_type(new_type) : new_type))
         end
     end
     args
