@@ -3,7 +3,7 @@ const REFERENCE_DICT = WeakKeyDict()
 """
 Preserves a ref as long as the parent is alive
 """
-function preserve(x::T, parent) where {T <: Ref}
+function preserve(x::T, parent; container::WeakKeyDict=REFERENCE_DICT) where {T <: Ref}
     refs = get!(REFERENCE_DICT, parent, [])
     push!(refs, x)
     nothing

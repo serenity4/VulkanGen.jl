@@ -27,7 +27,7 @@ function AbstractTrees.children(el::TypeDep)
             push!(sibling_chars, char)
         end
     end
-    TypeDep.(siblings)
+    TypeDep.(replace.(siblings, r"<:\s*" => ""))
 end
 
 struct Converted
@@ -55,12 +55,12 @@ type_conversions = Dict(
     "Cstring" => "String",
     "Cuint" => "UInt32",
     "VkBool32" => "Bool",
-    "Ptr{Cstring}" => "Union{<: AbstractArray, Ptr{Cvoid}}",
+    "Ptr{Cstring}" => "AbstractArray{String}",
     "NTuple{256, UInt8}" => "String",
     "NTuple{16, UInt8}" => "String",
     "Ptr{Cvoid}" => "Ptr{Cvoid}",
     "Cvoid" => "Cvoid",
-    "Ptr{Cfloat}" => "AbstractArray{<: Number}",
+    # "Ptr{Cfloat}" => "AbstractArray{<:Number}",
 )
 
 base_types = [
@@ -88,17 +88,18 @@ base_types = [
     "Nothing",
     "Cstring",
     "Cvoid",
-    "<:AbstractArray",
+    "Number",
     "VersionNumber",
-    "<:Number",
+    "AbstractArray",
+    "AbstractString",
 ]
 
 function widen_type(type)
     stype = supertype(eval(Meta.parse(type)))
-    stype <: Integer && return Integer
-    stype <: AbstractFloat && return Number
-    stype <: AbstractString && return AbstractString
-    stype
+    stype <: Integer && return "Integer"
+    stype <: AbstractFloat && return "Number"
+    stype <: AbstractString && return "AbstractString"
+    type
 end
 
 is_ptr_to_ptr(type) = startswith(type, "Ptr{Ptr{")
@@ -109,6 +110,7 @@ is_vulkan_type(name) = any(startswith.(Ref(name), ["vk", "Vk", "VK_"]))
 is_base_type(name) = name ∈ base_types || is_literal(name)
 is_literal(el) = occursin(r"[\.\"]+", el) || occursin(r"^\d+$", el)
 is_expr(el) = occursin(r"[\(\)~\[\]]", el)
+is_abstractarray_type(el) = startswith(el, "AbstractArray")
 
 
 "Returns all the leaf types that a type depends on, including itself if the type contains no inner type."

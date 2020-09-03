@@ -14,7 +14,7 @@ function group_cardinalities(arr)
     for name ∈ unique_names
         indices = findall(names_arr .== name)
         entries = getindex.(Ref(arr), indices)
-        pair_arr = getindex.(entries, 2) .=> getindex.(entries, 3)
+        pair_arr = replace.(getindex.(entries, 2), r",?null-terminated" => "") .=> getindex.(entries, 3)
         push!(dict_pairs, pair_arr)
     end
 
@@ -24,14 +24,42 @@ function group_cardinalities(arr)
     dict
 end
 
-const cardinality_groups = fetch_cardinality_groups(xroot)
+cardinality_groups = fetch_cardinality_groups(xroot)
 
-function cardinality(name, sname)
+
+function cardinality_group(name, sname)
     sname ∉ keys(cardinality_groups) && return nothing
-    len_els = cardinality_groups[sname]
-    index = findfirst(occursin.(Ref(name), first.(len_els)))
-    isnothing(index) && return nothing
-    last(len_els[index])
+    cardinality_groups[sname]
+end
+
+cardinality_group_index(name, len_els; compare=first) = findfirst(name .== compare.(len_els))
+
+function is_array_variable(name, sname)
+    len_els = cardinality_group(name, sname)
+    !isnothing(len_els) && !isnothing(cardinality_group_index(name, len_els; compare=last))
+end
+
+function is_count_variable(name, sname)
+    len_els = cardinality_group(name, sname)
+    !isnothing(len_els) && !isnothing(cardinality_group_index(name, len_els; compare=first))
+end
+
+function count_variable(name, sname)
+    if is_count_variable(name, sname)
+        len_els = cardinality_group(name, sname)
+        pos = first
+        index = cardinality_group_index(name, len_els; compare=pos)
+        pos(len_els[index])
+    end
+end
+
+function array_variable(name, sname)
+    if is_array_variable(name, sname)
+        len_els = cardinality_group(name, sname)
+        pos = last
+        index = cardinality_group_index(name, len_els; compare=pos)
+        pos(len_els[index])
+    end
 end
 
 function default(name, type)
@@ -40,6 +68,14 @@ function default(name, type)
     startswith(name, "p") && return "C_NULL"
     # @warn "Unknown default value for type $type ($name), setting 0 as default"
     "0"
+end
+
+function associated_array_variable(count_var_name, sname)
+    els = cardinality_groups[sname]
+    for el ∈ els
+        el[1] == count_var_name && return el[2]
+    end
+    error("No array variable associated to $count_var_name was found")
 end
 
 function group_optional_parameters(params)
@@ -68,3 +104,14 @@ function fetch_optional_parameters(xroot)
 end
 
 const optional_parameters_dict = fetch_optional_parameters(xroot)
+
+is_optional_parameter(name, sname) = sname ∈ keys(optional_parameters_dict) && name ∈ first.(optional_parameters_dict[sname])
+
+function optional_parameter_default_value(name, sname)
+    @assert is_optional_parameter(name, sname) "Parameter $name from structure $sname is not an optional parameter"
+    params = optional_parameters_dict[sname]
+    last(params[findfirst(first.(params) .== name)])
+end
+
+@assert is_array_variable("pQueueFamilyIndices", "VkBufferCreateInfo")
+@assert is_count_variable("queueFamilyIndexCount", "VkBufferCreateInfo")

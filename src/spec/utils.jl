@@ -14,3 +14,11 @@ function resolve_aliases!(collection::Dict, nodes)
         end
     end
 end
+
+macro return_if_nothing(expr)
+    lhs = expr.args[1]
+    quote
+        $(esc(expr))
+        isnothing($(esc(lhs))) && return nothing
+    end
+end

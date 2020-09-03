@@ -1,10 +1,4 @@
-s1 = Statement("a=2", "a", [])
-s2 = Statement("b=a+2", "b", ["a"])
-s3 = Statement("a=b", "a", ["a", "b"])
-
-s4 = Statement("a += b", nothing, ["a", "b"])
-s5 = Statement("a += c", nothing, ["a", "c"])
-s6 = Statement("a = b", "a", ["b"])
+s1 = Statement("a=2", "a")
 
 sdef1 = SDefinition("sdef1", false)
 sdef2 = SDefinition("sdef2", true)
@@ -44,12 +38,7 @@ edef2 = EDefinition(name="e1", fields=["a", "b", "c", "d"], with_begin_block=tru
         @test_throws ErrorException generate(FDefinition("replace", signature, true, [])) # short notation for a function without body
     end
     @testset "Statements" begin
-        @test @test_logs((:warn, "Overriding identifier a"), generate([s1, s2, s3])) == format_text("""a = 2
-                                                  b = a + 2
-                                                  a = b""")
-        @test_throws ErrorException generate([s6], check_identifiers=true)
-        @test generate([s4], signature) == format_text("a += b")
-        @test_throws ErrorException generate([s5], signature)
+        @test generate([s1]) == format_text("a = 2")
     end
     @testset "Constant definition" begin
         @test generate(cdef1) == format_text("const c1 = 0")

@@ -37,11 +37,11 @@ function wrap_enumeration_command(fdef)
     name = name_transform(fdef)
     sig = Signature(name, args, kwargs)
     body = [
-        Statement("count = Ref{UInt32}(0)", "count", []),
-        Statement("@check $(fdef.name)($(join_args([argnames(sig)..., "count", "C_NULL"])))", "count", []),
-        Statement("arr = Array{$(enumerated_type)}(undef, count[])", "arr", ["count"]),
-        Statement("@check $(fdef.name)($(join_args([argnames(sig)..., "count", "arr"])))", nothing, [argnames(sig)..., "count", "arr"]),
-        Statement(is_handle(enumerated_type) || enumerated_type == "void" ? "arr" : "Base.convert.(Ref($(name_transform(enumerated_type, SDefinition))), arr)", nothing, ["arr"]),
+        Statement("count = Ref{UInt32}(0)", "count"),
+        Statement("@check $(fdef.name)($(join_args([argnames(sig)..., "count", "C_NULL"])))", "count"),
+        Statement("arr = Array{$(enumerated_type)}(undef, count[])", "arr"),
+        Statement("@check $(fdef.name)($(join_args([argnames(sig)..., "count", "arr"])))"),
+        Statement(is_handle(enumerated_type) || enumerated_type == "void" ? "arr" : "Base.convert.(Ref($(name_transform(enumerated_type, SDefinition))), arr)"),
     ]
     FDefinition(name, sig, false, body)
 end

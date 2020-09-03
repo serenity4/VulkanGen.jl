@@ -30,13 +30,13 @@ end
 Spacing options can be controlled by providing the corresponding argument with a function.
 Files that are written to can be controlled by providing the filename argument with a function.
 """
-function Base.write(w_api::WrappedAPI, destfile; spacing=default_spacing, check=true)
+function Base.write(w_api::WrappedAPI, destfile; spacing=default_spacing)
     decls = OrderedDict((vcat(w_api.consts, w_api.enums, w_api.structs)...)...)
     decls_order = resolve_dependencies(decls)
     check_dependencies(decls, decls_order)
     open(destfile, "w+") do io; nothing end
     for decl ∈ Iterators.flatten((getindex.(Ref(decls), decls_order), values(w_api.funcs)))
-        kwargs = typeof(decl) == FDefinition ? (check_identifiers = check,) : ()
+        kwargs = ()
         open(destfile, "a+") do io
             write_api!(io, decl; spacing, kwargs...)
         end

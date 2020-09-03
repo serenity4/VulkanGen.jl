@@ -38,9 +38,21 @@ end
     end
 end
 
+@generated function unsafe_pointer(obj::Base.RefValue{<: AbstractArray{T, 1}}) where {T}
+    quote
+        Base.unsafe_convert(Ptr{T}, obj[])
+        # pointer_from_objref(obj[])
+    end
+end
+
+
 pointer_length(p) = p == C_NULL || isempty(p) ? 0 : length(p)
 
-convert_vk(::Type{T}, str::NTuple{N,UInt8}) where {N,T <: AbstractString} = T(filter(x -> x != 0, UInt8[str...]))
+convert_vk(::Type{T}, str::NTuple{N,UInt8}) where {N,T <: AbstractString} = String(filter(x -> x != 0, UInt8[str...]))
 convert_vk(::Type{VersionNumber}, version::UInt32) = VersionNumber(UInt32(version) >> 22, (UInt32(version) >> 12) & 0x3ff, UInt32(version) & 0xfff)
 convert_vk_back(::Type{UInt32}, version::VersionNumber) = (version.major << 22) + (version.minor << 12) + version.patch
 convert_vk_back(T::Type{NTuple{N,UInt8}}, s::String) where {N} = T(s * "\0" ^ (N - length(s)))
+
+function unsafe_load_pointer(ptr, original_obj::T) where {T}
+    a = T <: AbstractArray ? unsafe_wrap(T, ptr, (1:length(original_obj))...) : T == String ? unsafe_string(ptr) : typeof(ptr) <: Base.RefValue ? unsafe_load(ptr)[] : unsafe_load(ptr)
+end

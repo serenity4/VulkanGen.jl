@@ -8,7 +8,6 @@ generate(cgs::Declaration) = error("No generator available for type $(typeof(cgs
 struct Statement
     body::AbstractString
     assigned_id
-    evaluated_ids
 end
 
 
@@ -47,7 +46,7 @@ function generate(edef::EDefinition)
     format_text("$(edef.enum_macro) $(typed_field(edef.name, edef.type)) $(bg ? "begin\n" : "") $(join(edef.fields, bg ? "\n" : " ")) $(bg ? "\nend" : "")")
 end
 
-Statement(body::AbstractString) = Statement(strip(body), nothing, [])
+Statement(body::AbstractString) = Statement(strip(body), nothing)
 SDefinition(name::AbstractString, is_mutable::Bool; fields=()) = SDefinition(name, is_mutable, OrderedDict(fields))
 Signature(sdef::SDefinition) = Signature(sdef.name, PositionalArgument.(keys(sdef.fields), values(sdef.fields)), KeywordArgument[])
 
@@ -107,28 +106,10 @@ function SDefinition(str::AbstractString)
     SDefinition(name, is_mutable, field_decls)
 end
 
-function check(statements::AbstractArray{Statement}, init_ids)
-    ids = copy(init_ids)
-    for st ∈ statements
-        if !isnothing(st.assigned_id)
-            st.assigned_id ∉ ids || @warn "Overriding identifier $(st.assigned_id)"
-            push!(ids, st.assigned_id)
-        end
-        for id ∈ st.evaluated_ids
-            id ∈ ids || error("Unknown identifier $id in \n$(join(getproperty.(statements, :body), "\n"))")
-        end
-    end
-end
-
-function generate(statements::AbstractArray{Statement}; init_ids=[], check_identifiers=true)
+function generate(statements::AbstractArray{Statement})
     isempty(statements) && return ""
-    if check_identifiers
-        check(statements, init_ids)
-    end
     format_text(join(getproperty.(statements, :body), "\n"))
 end
-
-generate(statements::AbstractArray{Statement}, sig::Signature) = generate(statements; init_ids=argnames(sig))
 
 function generate(s::SDefinition)
     def = (s.is_mutable ? "mutable " : "") * "struct $(s.name)"
@@ -136,8 +117,8 @@ function generate(s::SDefinition)
     format_text("$def $fields end")
 end
 
-function generate(f::FDefinition; check_identifiers=true)
-    body = check_identifiers ? generate(f.body, f.signature) : generate(f.body, check_identifiers=false)
+function generate(f::FDefinition)
+    body = generate(f.body)
     if f.short
         str = generate(f.signature) * " = " * body
     else

@@ -26,9 +26,11 @@ end
 
 f_api = filter_api(api)
 w_api = wrap(f_api)
-write(w_api, joinpath(dirname(@__DIR__), "generated", "wrapped_api.jl"), check=false)
+write(w_api, joinpath(dirname(@__DIR__), "generated", "wrapped_api.jl"))
 
 # for fdef ∈ values(w_api.funcs)
 #     println(fdef)
 #     @info VulkanGen.dependencies(fdef)
 # end
+
+# println(unsafe_string(unsafe_load(pCreateInfo[].ppEnabledLayerNames)))
