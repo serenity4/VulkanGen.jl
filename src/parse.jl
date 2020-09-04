@@ -73,7 +73,7 @@ end
 
 function parse_ptr(sym)
     base = remove_prefix(sym)
-    SDefinition(sym, false, OrderedDict("handle" => "Ptr{Nothing}", "deps" => "Any")) # will be transformed by the struct_wrapper
+    SDefinition(sym, false, OrderedDict("handle" => "Ptr{Nothing}")) # will be transformed by the struct_wrapper
 end
 
 function API(file, eval_symbol)

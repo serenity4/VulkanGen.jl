@@ -23,6 +23,7 @@ struct FDefinition <: Declaration
     signature::Signature
     short::Bool
     body::AbstractArray{Statement}
+    docstring::AbstractString
 end
 
 struct CDefinition <: Declaration
@@ -78,6 +79,8 @@ function FDefinition(str::AbstractString)
     FDefinition(id, sig, short, body)
 end
 
+FDefinition(name::AbstractString, signature::Signature, short::Bool, body::AbstractArray{Statement}) = FDefinition(name, signature, short, body, "")
+
 function CDefinition(str::AbstractString)
     split_str = split(str, " ")
     id = split_str[2]
@@ -119,10 +122,11 @@ end
 
 function generate(f::FDefinition)
     body = generate(f.body)
+    docstring = isempty(f.docstring) ? "" : "\"$(f.docstring)\"\n"
     if f.short
-        str = generate(f.signature) * " = " * body
+        str = docstring * generate(f.signature) * " = " * body
     else
-        str = "function $(generate(f.signature)) $(body) end"
+        str = docstring * "function $(generate(f.signature)) $(body) end"
     end
     format_text(str)
 end

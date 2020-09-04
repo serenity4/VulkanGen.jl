@@ -1,5 +1,5 @@
 include(joinpath(@__DIR__, "..", "..", "src", "vk_utils.jl"))
-include(joinpath(@__DIR__, "..", "..", "src", "ref_util.jl"))
+# include(joinpath(@__DIR__, "..", "..", "src", "ref_utils.jl"))
 using Test
 
 mycont = WeakKeyDict()
@@ -18,7 +18,8 @@ function create_pointer(a)
 end
 
 function deref_pointer(w, original_copy)
-    a = unsafe_load_pointer(w.wrapped_value, original_copy)
+    val = w.wrapped_value
+    a = typeof(original_copy) <: AbstractArray ? unsafe_pointer_load(val, length(original_copy)) : unsafe_pointer_load(val)
     @assert a == original_copy "$original_copy => $a"
     true
 end

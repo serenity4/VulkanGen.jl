@@ -31,20 +31,8 @@ end
 
 """Produce an unsafe pointer of type Ptr{T} from a Ref{T} reference.
 """
-@generated function unsafe_pointer(obj)
-    quote
-        Base.unsafe_convert(Ptr{typeof(obj[])}, obj)
-        # pointer_from_objref(obj[])
-    end
-end
-
-@generated function unsafe_pointer(obj::Base.RefValue{<: AbstractArray{T, 1}}) where {T}
-    quote
-        Base.unsafe_convert(Ptr{T}, obj[])
-        # pointer_from_objref(obj[])
-    end
-end
-
+unsafe_pointer(obj) = Base.unsafe_convert(Ptr{typeof(obj[])}, obj)
+unsafe_pointer(obj::Base.RefValue{<: AbstractArray}) = pointer(obj[])
 
 pointer_length(p) = p == C_NULL || isempty(p) ? 0 : length(p)
 
@@ -53,6 +41,12 @@ convert_vk(::Type{VersionNumber}, version::UInt32) = VersionNumber(UInt32(versio
 convert_vk_back(::Type{UInt32}, version::VersionNumber) = (version.major << 22) + (version.minor << 12) + version.patch
 convert_vk_back(T::Type{NTuple{N,UInt8}}, s::String) where {N} = T(s * "\0" ^ (N - length(s)))
 
-function unsafe_load_pointer(ptr, original_obj::T) where {T}
-    a = T <: AbstractArray ? unsafe_wrap(T, ptr, (1:length(original_obj))...) : T == String ? unsafe_string(ptr) : typeof(ptr) <: Base.RefValue ? unsafe_load(ptr)[] : unsafe_load(ptr)
+function unsafe_pointer_load(ptr::Ptr{T}; index=1) where {T}
+    a = T <: Base.RefValue ? unsafe_load(ptr, index)[] : unsafe_load(ptr, index)
+end
+
+unsafe_pointer_load(ptr::Ptr{UInt8}) = unsafe_string(ptr)
+
+function unsafe_pointer_load(ptr::Ptr{T}, length::Integer) where {T}
+    a = unsafe_wrap(Array{T}, ptr, length)
 end

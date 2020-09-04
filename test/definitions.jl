@@ -5,7 +5,7 @@ sdef2 = SDefinition("sdef2", true)
 sdef3 = SDefinition("sdef3", true, fields=("device" => Ptr{Nothing}, "notype" => nothing))
 
 signature = Signature(first(methods(replace)))
-fdef1 = FDefinition("replace", signature, false, [])
+fdef1 = FDefinition("replace", signature, false, Statement[])
 fdef2 = FDefinition("replace", signature, false, [Statement("a=5")])
 fdef3 = FDefinition("replace", signature, false, Statement.(["i=1", "i+=1", "nothing"]))
 
@@ -35,7 +35,7 @@ edef2 = EDefinition(name="e1", fields=["a", "b", "c", "d"], with_begin_block=tru
                              i += 1
                              nothing
                          end""")
-        @test_throws ErrorException generate(FDefinition("replace", signature, true, [])) # short notation for a function without body
+        @test_throws ErrorException generate(FDefinition("replace", signature, true, Statement[])) # short notation for a function without body
     end
     @testset "Statements" begin
         @test generate([s1]) == format_text("a = 2")

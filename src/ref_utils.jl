@@ -1,16 +1,15 @@
-const REFERENCE_DICT = WeakKeyDict()
+REFERENCE_DICT = WeakKeyDict()
 
 """
 Preserves a ref as long as the parent is alive
 """
-function preserve(x::T, parent; container::WeakKeyDict=REFERENCE_DICT) where {T <: Ref}
+function preserve(x::Base.RefValue, parent; container::WeakKeyDict=REFERENCE_DICT)
     refs = get!(REFERENCE_DICT, parent, [])
     push!(refs, x)
-    nothing
 end
 
 function preserved_ref(x, parent)
-    ref = Ref(x)
+    ref = x isa Ref ? x : Ref(x)
     haskey(REFERENCE_DICT, parent) && ref ∈ REFERENCE_DICT[parent] && return ref
     preserve(ref, parent)
     ref
@@ -31,3 +30,8 @@ True = yes, false = no!
 """
 is_referenceable(x::T) where T <: DenseArray = true
 is_referenceable(x::T) where T = ismutable(T)
+
+function clear_refs()
+    global REFERENCE_DICT
+    REFERENCE_DICT = WeakKeyDict()
+end

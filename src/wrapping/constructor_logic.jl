@@ -4,13 +4,12 @@ function constructor(api, new_sdef, sdef)
         push!(defs, conversion(api, new_sdef, sdef, ConvertVkStructure()))
     end
     if !is_enumerated_property(sdef)
-
-        if is_handle(sdef.name) && "CreateInfo" ∈ argnames(Signature(sdef))
-            cons = constructor(api, new_sdef, sdef, ConstructorWithCreateInfo())
+        if is_handle(sdef.name)
+            # cons = constructor(api, new_sdef, sdef, ConstructorWithCreateInfo())
         else
             cons = constructor(api, new_sdef, sdef, GenericConstructor())
+            push!(defs, cons)
         end
-        push!(defs, cons)
     end
     defs, constructor_key.(Ref(sdef), is_conversion.(defs))
 end
@@ -128,7 +127,7 @@ function constructor(api, new_sdef, sdef, definition::GenericConstructor)
     final_argnames = map(x -> x ∈ ptr_args ? "$x[]" : x, argnames(default_co_sig))
     push!(body, Statement("vk = $(vk_sig.name)($(join_args(init_args)))\n", "vk"))
     push!(body, Statement("$(default_co_sig.name)($(join_args(final_argnames)))", nothing))
-    FDefinition(new_sdef.name, co_sig, length(body) == 1, body)
+    FDefinition(new_sdef.name, co_sig, length(body) == 1, body, "GenericConstructor")
 end
 
 function constructor(api, new_sdef, sdef, ::CreateVkHandle; create_info_sdef, create_fun_fdef)
@@ -146,7 +145,7 @@ function constructor(api, new_sdef, sdef, ::CreateVkHandle; create_info_sdef, cr
     push!(body, Statement("@check $(create_fun_sig.name)($(join_args(argnames(create_fun_sig))))", nothing))
     # push!(body, Statement("Base.finalize($create_fun_sig", nothing))
     push!(body, Statement("$(new_sdef.name)($name[], $(argnames(create_info_sig))", nothing))
-    FDefinition(new_sig.name, new_sig, false, body)
+    FDefinition(new_sig.name, new_sig, false, body, "CreateVkHandle")
 end
 
 function accumulate_passes(sdef, passes; use_all_args=true)
@@ -178,7 +177,8 @@ function accumulate_passes(sdef, passes; use_all_args=true)
 end
 
 function conversion(api, new_sdef, sdef, ::ConvertVkStructure)
-    var = "vk_struct"
+    var = is_handle(sdef.name) ? "vk_handle" : "vk_struct"
+    is_handle(sdef.name) && return FDefinition("Base.convert(T::Type{$(new_sdef.name)}, $var::$(sdef.name)) = $(new_sdef.name)($var)")
     conversion(api, new_sdef, sdef, [TranslateVkTypes(var), TakeConversionArgsFromVkVar(var)], var)
 end
 
@@ -269,7 +269,7 @@ function pass!(args::PassArgs, ::Type{GeneratePointers})
                 sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, name)
                 insert!(sts, 1, Statement("$reffed_obj = pointer.($last_name)", reffed_obj))
             else
-                reffed_obj = last_name
+                reffed_obj = is_vulkan_type(inner_type(type)) ? "getproperty.($last_name, :vk)" : last_name
                 sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, name)
             end
         elseif new_type == "String"
