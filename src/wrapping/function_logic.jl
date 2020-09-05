@@ -9,7 +9,7 @@ function wrap!(w_api, api, fdef::FDefinition)
         name = name_transform(fdef)
         # body = statements(patterns(fdef))
         # new_fdef = FDefinition(name, Signature(name, args, kwargs), fdef.short, body)
-        new_fdef = FDefinition(name, Signature(name, fdef.signature.args, fdef.signature.kwargs), fdef.short, [Statement(replace(fdef.body[1].body, "PFN" => "vk.PFN"))])
+        new_fdef = FDefinition(name, Signature(name, fdef.signature.args, fdef.signature.kwargs), fdef.short, fdef.body)
     end
     w_api.funcs[new_fdef.name] = new_fdef
 end
@@ -75,11 +75,7 @@ function wrap_creation_command(fdef)
     create_info_arg = "create_info"
     ci_ref_wrap = Statement("pCreateInfo = Ref($create_info_arg.vk)", "pCreateInfo")
     create_info_index = findfirst(names .== "pCreateInfo")
-    println(types)
-    println(names)
     args_before_ci = getindex.(Ref(names), 1:(create_info_index - 1))
-    println(args_before_ci)
-    println()
     create_args = join_args([(args_before_ci .* ".handle")..., "pCreateInfo", "allocator", created_el_name])
     create_statement = Statement("@check $called_fun($create_args)")
     deref_el = Statement("$created_el_new_type($created_el_name[], $create_info_arg)")

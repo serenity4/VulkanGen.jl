@@ -353,8 +353,12 @@ function arguments(api, sdef::SDefinition)
             else
                 if startswith(new_type, "AbstractArray")
                     eltype = inner_type(new_type)
-                    new_type_ = eltype ∈ base_types ? replace(new_type, Regex("(?<={)(?<include>.*?)$eltype") => string("<:" * widen_type(eltype))) : new_type
-                    # println("$new_type => $eltype => $new_type_")
+                    if eltype ∈ ["String", "AbstractString"]
+                        new_type_ = "AbstractArray"
+                    else
+                        new_type_ = eltype ∈ base_types ? replace(new_type, Regex("(?<={)(?<include>.*?)$eltype") => string("<:" * widen_type(eltype))) : new_type
+                        # println("$new_type => $eltype => $new_type_")
+                    end
                 else
                     new_type_ = new_type ∈ base_types ? widen_type(new_type) : new_type
                 end
