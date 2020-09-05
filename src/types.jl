@@ -92,6 +92,7 @@ base_types = [
     "VersionNumber",
     "AbstractArray",
     "AbstractString",
+    "Any",
 ]
 
 function widen_type(type)

@@ -19,8 +19,10 @@ function structure(sdef)
         new_fields["handle"] = handle
         if haskey(handle_creation_info, handle)
             new_name_create_info = handle_creation_info[handle][2]
-            new_name_create_info_unaliased = isalias(new_name_create_info) ? follow_alias(new_name_create_info) : new_name_create_info
-            new_fields["info"] = name_transform(new_name_create_info, SDefinition) # use the wrapped info type
+            # new_name_create_info_unaliased = isalias(new_name_create_info) ? follow_alias(new_name_create_info) : new_name_create_info
+
+            # VkSwapchainCreateInfoKHR depends on VkSwapchainKHR, which introduces a circular dependency.
+            new_fields["info"] = new_name_create_info == "VkSwapchainCreateInfoKHR" ? "Any" : name_transform(new_name_create_info, SDefinition) # use the wrapped info type
         end
     else
         for (name, type) ∈ sdef.fields
