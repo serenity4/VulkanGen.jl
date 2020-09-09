@@ -25,6 +25,12 @@ function write_api!(io::IO, def::Declaration; spacing, kwargs...)
     write(io, generate(def; kwargs...) * spacing(def))
 end
 
+pre_wrap_code = """
+abstract type Handle end
+Base.convert(::Type{Ptr{Nothing}}, h::Handle) = h.handle
+
+"""
+
 """Write a wrapped API to files in dest_dir.
 
 Spacing options can be controlled by providing the corresponding argument with a function.
@@ -34,7 +40,9 @@ function Base.write(w_api::WrappedAPI, destfile; spacing=default_spacing)
     decls = OrderedDict((vcat(w_api.consts, w_api.enums, w_api.structs)...)...)
     decls_order = resolve_dependencies(decls)
     check_dependencies(decls, decls_order)
-    open(destfile, "w+") do io; nothing end
+    open(destfile, "w+") do io
+        write(io, pre_wrap_code)
+    end
     for decl ∈ Iterators.flatten((getindex.(Ref(decls), decls_order), values(w_api.funcs)))
         kwargs = ()
         open(destfile, "a+") do io
@@ -95,6 +103,7 @@ function wrap!(w_api, api, edef::EDefinition)
     new_edef = EDefinition(remove_vk_prefix(edef.name), remove_vk_prefix.(edef.fields), edef.with_begin_block, isnothing(edef.type) ? nothing : remove_vk_prefix(edef.type), edef.enum_macro)
     w_api.enums[new_edef.name] = new_edef
     w_api.funcs["convert_$(edef.name)"] = FDefinition("Base.convert(T::Type{$(new_edef.name)}, e::$(edef.name)) = T(UInt(e))")
+    w_api.funcs["convert_$(new_edef.name)"] = FDefinition("Base.convert(T::Type{$(edef.name)}, e::$(new_edef.name)) = T(UInt(e))")
 end
 
 function wrap!(w_api, api, cdef::CDefinition)

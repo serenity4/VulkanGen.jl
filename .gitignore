@@ -1,5 +1,6 @@
 resolution_graph.txt
-/dev
+/vk.xml
+/registry.rnc
 JuliaSysimage.so
 Manifest.toml
 *.code-workspace

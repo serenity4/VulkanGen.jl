@@ -10,3 +10,6 @@ function fetch_enumeration_command_counts(xroot)
 end
 
 enumeration_command_counts = fetch_enumeration_command_counts(xroot)
+enumeration_command_counts["vkGetPhysicalDeviceSurfaceCapabilitiesKHR"] = "pSurfaceCapabilities" => "VkSurfaceCapabilitiesKHR"
+
+is_enumeration_command(fdef) = haskey(enumeration_command_counts, fdef.name)

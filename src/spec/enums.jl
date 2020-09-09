@@ -1,11 +1,19 @@
-struct VkFlagType
-    name
-    bitmask
+function fetch_enums(xroot)
+    nodes = findall("//type[@category='enum']", xroot)
+    getindex.(nodes, "name")
 end
 
-bitmask_nodes = findall("//type[@category='bitmask']", xroot)
-bitmasks = member_attr.(bitmask_nodes, "name")
+function fetch_bitmasks(xroot)
+    bitmask_nodes = findall("//type[@category='bitmask']", xroot)
+    member_attr.(bitmask_nodes, "name")
+end
+
+bitmasks = fetch_bitmasks(xroot)
 is_bitmask(type) = type ∈ bitmasks
+
+enums = fetch_enums(xroot)
+is_enum(type) = type ∈ enums
+
 
 # println.(bitmask_nodes);
 
@@ -18,3 +26,5 @@ is_bitmask(type) = type ∈ bitmasks
 #         flags_correspondence[name] = VkFlagType(name, bitmask)
 #     end
 # end
+
+fetch_enums(xroot)

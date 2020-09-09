@@ -1,7 +1,18 @@
 function fetch_cardinality_groups(xroot)
-    cardinalities = findall("//member[@len!='null-terminated']", xroot)
-    group_cardinalities([(member.parentnode["name"], haskey(member, "altlen") ? member["altlen"] : member["len"], nodecontent(findfirst("name", member))) for member ∈ cardinalities])
+    cardinalities_struct = findall("//member[@len!='null-terminated']", xroot)
+    cardinalities_func = findall("//param[@len!='null-terminated']", xroot)
+    cardinalities_to_group = []
+    for card ∈ cardinalities_struct
+        push!(cardinalities_to_group, (struct_name(card), haskey(card, "altlen") ? card["altlen"] : card["len"], nodecontent(findfirst("name", card))))
+    end
+    for card ∈ cardinalities_func
+        push!(cardinalities_to_group, (command_name(card), haskey(card, "altlen") ? card["altlen"] : card["len"], nodecontent(findfirst("name", card))))
+    end
+    group_cardinalities(cardinalities_to_group)
 end
+
+command_name(param_node) = param_node.parentelement.firstelement.firstelement.nextelement.content
+struct_name(member_node) = member_node.parentnode["name"]
 
 """Create a dictionary relating pointer variables to their cardinality.
 
@@ -63,7 +74,7 @@ function array_variable(name, sname)
 end
 
 function default(name, type)
-    is_handle(type) && return "VK_NULL_HANDLE"
+    is_handle(type) && return "C_NULL"
     (is_bitmask(type) || type ∈ ["uint16_t", "uint64_t", "int16_t", "uint32_t", "int32_t", "float", "size_t", "VkBool32", "VkSampleMask", "VkFlags", "VkDeviceSize", "VkDeviceAddress", "DWORD"]) && return "0"
     startswith(name, "p") && return "C_NULL"
     # @warn "Unknown default value for type $type ($name), setting 0 as default"
@@ -94,16 +105,20 @@ end
 
 function fetch_optional_parameters(xroot)
     member_nodes = findall("//member[@optional='true']", xroot)
-    # println.(member_nodes)
+    param_nodes = findall("//param[@optional='true']", xroot)
     optional_parameters = []
     for param ∈ member_nodes
         name, type = member_attr.(Ref(param), ["name", "type"])
-        push!(optional_parameters, [param.parentnode["name"], name, default(name, type)])
+        push!(optional_parameters, [struct_name(param), name, default(name, type)])
+    end
+    for param ∈ param_nodes
+        name, type = member_attr.(Ref(param), ["name", "type"])
+        push!(optional_parameters, [command_name(param), name, default(name, type)])
     end
     group_optional_parameters(optional_parameters)
 end
 
-const optional_parameters_dict = fetch_optional_parameters(xroot)
+optional_parameters_dict = fetch_optional_parameters(xroot)
 
 is_optional_parameter(name, sname) = sname ∈ keys(optional_parameters_dict) && name ∈ first.(optional_parameters_dict[sname])
 

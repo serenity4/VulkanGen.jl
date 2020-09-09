@@ -5,15 +5,13 @@ using VulkanCore.vk
 using VulkanCore:vk
 using VulkanCore
 
+include("spec.jl")
+
 include("utils.jl")
 include("naming_conventions.jl")
 include("signatures.jl")
 include("types.jl")
 include("codegen.jl")
-
-include("VulkanSpec.jl")
-using .VulkanSpec
-
 include("vulkan.jl")
 include("parse.jl")
 include("dependency_resolution.jl")

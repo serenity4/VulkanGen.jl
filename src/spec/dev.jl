@@ -22,7 +22,7 @@ renderpass_compatibility(node) = (nr = node["renderpass"]; nr == "both" ? [Rende
 
 VkCommandInfo(node::EzXML.Node) = VkCommandInfo(command_name(node), command_queue_compatibility(node), renderpass_compatibility(node))
 
-xdoc = readxml(joinpath(@__DIR__, "vk.xml"))
+xdoc = readxml(joinpath(dirname(dirname(@__DIR__)), "vk.xml"))
 xroot = xdoc.root
 
 include("utils.jl")
@@ -53,3 +53,10 @@ function fetch_externsync_params(xroot)
 end
 
 fetch_externsync_params(xroot)
+
+function fetch_enums(xroot)
+    nodes = findall("//type[@category='enum']", xroot)
+    println.(getindex.(nodes, "name"))
+end
+
+fetch_enums(xroot)

@@ -12,23 +12,29 @@ function wrap_structure!(w_api, new_sdef)
     end
 end
 
+optional_create_info_types = Dict(
+    "VkImage" => "VkImageCreateInfo"
+)
+
 function structure(sdef)
     new_fields = OrderedDict()
     if is_handle(sdef.name)
         handle = sdef.name
         new_fields["handle"] = handle
         if haskey(handle_creation_info, handle)
-            new_name_create_info = handle_creation_info[handle][2]
-            # new_name_create_info_unaliased = isalias(new_name_create_info) ? follow_alias(new_name_create_info) : new_name_create_info
+            create_info_type = handle_creation_info[handle][2]
+            # create_info_type_unaliased = isalias(create_info_type) ? follow_alias(create_info_type) : create_info_type
 
             # VkSwapchainCreateInfoKHR depends on VkSwapchainKHR, which introduces a circular dependency.
-            new_fields["info"] = new_name_create_info == "VkSwapchainCreateInfoKHR" ? "Any" : name_transform(new_name_create_info, SDefinition) # use the wrapped info type
+            new_fields["info"] = (create_info_type == "VkSwapchainCreateInfoKHR" || create_info_type isa AbstractArray) ? "Any" : create_info_type ∈ values(optional_create_info_types) ? "Union{Nothing,$create_info_type}" : name_transform(create_info_type, SDefinition) # use the wrapped info type
         end
+        abstract_type = "Handle"
     else
+        abstract_type = nothing
         for (name, type) ∈ sdef.fields
             discard_field(name, type, sdef) && continue
             new_name, new_type = field_transform(name, type, sdef)
-            new_type_ = is_optional_parameter(name, sdef.name) && optional_parameter_default_value(name, sdef.name) ∉ ["0", "VK_NULL_HANDLE"] ? "Union{Nothing, $new_type}" : new_type
+            new_type_ = is_optional_parameter(name, sdef.name) ? "Union{Nothing, $new_type}" : new_type
             new_fields[new_name] = new_type_
         end
         if !is_enumerated_property(sdef)
@@ -36,7 +42,7 @@ function structure(sdef)
         end
     end
     new_name = name_transform(sdef)
-    SDefinition(new_name, any(isa.(Finalizer, typeof.(patterns(sdef)))), new_fields)
+    SDefinition(new_name, is_handle(sdef.name), new_fields, abstract_type)
 end
 
 convention_exceptions = Dict(

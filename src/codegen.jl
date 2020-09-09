@@ -15,6 +15,7 @@ struct SDefinition <: Declaration
     name::AbstractString
     is_mutable::Bool
     fields::OrderedDict
+    abstract_type
 end
 
 
@@ -24,6 +25,7 @@ struct FDefinition <: Declaration
     short::Bool
     body::AbstractArray{Statement}
     docstring::AbstractString
+    return_type::AbstractString
 end
 
 struct CDefinition <: Declaration
@@ -48,6 +50,7 @@ function generate(edef::EDefinition)
 end
 
 Statement(body::AbstractString) = Statement(strip(body), nothing)
+SDefinition(name::AbstractString, is_mutable::Bool, fields::OrderedDict) = SDefinition(name, is_mutable, fields, nothing)
 SDefinition(name::AbstractString, is_mutable::Bool; fields=()) = SDefinition(name, is_mutable, OrderedDict(fields))
 Signature(sdef::SDefinition) = Signature(sdef.name, PositionalArgument.(keys(sdef.fields), values(sdef.fields)), KeywordArgument[])
 
@@ -79,7 +82,8 @@ function FDefinition(str::AbstractString)
     FDefinition(id, sig, short, body)
 end
 
-FDefinition(name::AbstractString, signature::Signature, short::Bool, body::AbstractArray{Statement}) = FDefinition(name, signature, short, body, "")
+FDefinition(name::AbstractString, signature::Signature, short::Bool, body::AbstractArray{Statement}) = FDefinition(name, signature, short, body, "", "")
+FDefinition(name::AbstractString, signature::Signature, short::Bool, body::AbstractArray{Statement}, docstring::AbstractString) = FDefinition(name, signature, short, body, docstring, "")
 
 function CDefinition(str::AbstractString)
     split_str = split(str, " ")
@@ -115,7 +119,7 @@ function generate(statements::AbstractArray{Statement})
 end
 
 function generate(s::SDefinition)
-    def = (s.is_mutable ? "mutable " : "") * "struct $(s.name)"
+    def = (s.is_mutable ? "mutable " : "") * "struct $(s.name)" * (isnothing(s.abstract_type) ? "" : "<: $(s.abstract_type)")
     fields = join(typed_field.(keys(s.fields), values(s.fields)), "\n")
     format_text("$def $fields end")
 end

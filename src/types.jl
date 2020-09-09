@@ -60,6 +60,13 @@ type_conversions = Dict(
     "NTuple{16, UInt8}" => "String",
     "Ptr{Cvoid}" => "Ptr{Cvoid}",
     "Cvoid" => "Cvoid",
+    "Ptr{ANativeWindow}" => "Ptr{Cvoid}",
+    "Ptr{AHardwareBuffer}" => "Ptr{Cvoid}",
+    "Ptr{CAMetalLayer}" => "Ptr{Cvoid}",
+    "Ptr{xcb_connection_t}" => "Ptr{Cvoid}",
+    "xcb_window_t" => "UInt32",
+    "Window" => "UInt32",
+    "Ptr{Display}" => "Ptr{Cvoid}"
     # "Ptr{Cfloat}" => "AbstractArray{<:Number}",
 )
 
@@ -93,6 +100,7 @@ base_types = [
     "AbstractArray",
     "AbstractString",
     "Any",
+
 ]
 
 function widen_type(type)
@@ -104,7 +112,7 @@ function widen_type(type)
 end
 
 is_ptr_to_ptr(type) = startswith(type, "Ptr{Ptr{")
-is_ptr(type) = startswith(type, "Ptr{")
+is_ptr(type) = startswith(type, "Ptr{") || type == "Cstring"
 is_ntuple(type) = startswith(type, "NTuple{")
 
 is_vulkan_type(name) = any(startswith.(Ref(name), ["vk", "Vk", "VK_"]))

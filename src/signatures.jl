@@ -23,6 +23,9 @@ function PositionalArgument(decl::AbstractString)
     PositionalArgument(name, type)
 end
 
+Base.names(arg::AbstractArray{<: Argument}) = getproperty.(arg, :name)
+types(arg::AbstractArray{PositionalArgument}) = getproperty.(arg, :type)
+
 struct Signature
     name::AbstractString
     args::AbstractArray{PositionalArgument}

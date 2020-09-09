@@ -22,3 +22,10 @@ macro return_if_nothing(expr)
         isnothing($(esc(lhs))) && return nothing
     end
 end
+
+function extract_type(param)
+    type = split(replace(param.content, "const " => ""))[1]
+    endswith(type, "*") ? "Ptr{$(type[1:end-1])}" : type
+end
+
+extract_identifier(param) = split(replace(param.content, "const " => ""))[2]

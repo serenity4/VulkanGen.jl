@@ -35,15 +35,50 @@ function fetch_handles(xroot)
     handles
 end
 
-const handles = fetch_handles(xroot)
+handles = fetch_handles(xroot)
 is_handle(type) = type ∈ (keys(handles)..., "HANDLE")
 
 function fetch_handle_creation_info(xroot)
     nodes = findall("//command/proto[contains(./child::name, 'vkCreate')]/following-sibling::param[contains(., 'const ')]/child::type[contains(., 'CreateInfo')]", xroot)
-    OrderedDict(node.parentelement.parentelement.lastelement.firstelement.content => (node.parentelement.parentelement.firstelement.firstelement.nextelement.content, node.content, node.nextelement.content) for node ∈ nodes)
+    res = OrderedDict()
+    for node ∈ nodes
+        type = node.parentelement.parentelement.lastelement.firstelement.content
+        create_fun = node.parentelement.parentelement.firstelement.firstelement.nextelement.content
+        create_info_struct = node.content
+        identifier = node.nextelement.content
+        if haskey(res, type) # several create info were available for a given handle
+            cf, cis, i = res[type]
+            if !(cf isa AbstractArray) # first time that an array needs to be created
+                cf, cis, i = [cf], [cis], [i]
+            end
+            res[type] = [[cf..., create_fun], [cis..., create_info_struct], [i..., identifier]]
+        else
+            res[type] = (create_fun, create_info_struct, identifier)
+        end
+    end
+    res
 end
 
 handle_creation_info = fetch_handle_creation_info(xroot)
+is_handle_with_create_info(name) = name ∈ keys(handle_creation_info)
+
+function fetch_handle_destruction_info(xroot)
+    nodes = findall("//command/proto[contains(./child::name, 'vkDestroy')]", xroot)
+    res = OrderedDict()
+    for node ∈ nodes
+        destroyed_el = findfirst(".//param[@externsync='true']", node.parentelement)
+        destroy_fun = findfirst(".//child::name", node).content
+        destroyed_type = extract_type(destroyed_el)
+        all_params = findall(".//param[..//../command]", node.parentelement)
+        identifiers = extract_identifier.(all_params)
+        types = extract_type.(all_params)
+        res[destroyed_type] = (destroy_fun, identifiers, types)
+    end
+    res
+end
+
+handle_destruction_info = fetch_handle_destruction_info(xroot)
+is_handle_destructible(type) = type ∈ keys(handle_destruction_info)
 
 @assert issubset(keys(handle_creation_info), keys(handles))
 @assert collect(keys(handle_creation_info)) == unique(keys(handle_creation_info))
