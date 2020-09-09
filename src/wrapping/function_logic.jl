@@ -20,13 +20,13 @@ function typed_fdef(fdef::FDefinition)
     FDefinition(called_fun, Signature(called_fun, PositionalArgument.(names, types), KeywordArgument[]), fdef.short, fdef.body, "", ret_type)
 end
 
-function arguments(fdef::FDefinition)
-    names_ = argnames(fdef.signature)
-    non_param_names = filter(x -> !is_parameter(x, fdef.name), names_)
-    non_param_indices = map(x -> findfirst(names_ .== x), non_param_names)
-    non_param_args = getindex.(Ref(fdef.signature.args), non_param_indices)
-    PositionalArgument.(map((x, y) -> fieldname_transform(x, y), names(non_param_args), types(non_param_args)))
+function arg_transform(arg::PositionalArgument)
+    PositionalArgument(argname_transform(arg), argtype_transform(arg))
 end
+
+
+argname_transform(arg::PositionalArgument) = fieldname_transform(arg.name, arg.type)
+argtype_transform(arg::PositionalArgument) = fieldtype_transform(arg.name, arg.type)
 
 is_parameter(name, fname) = is_optional_parameter(name, fname) && !is_array_variable(name, fname)
 
@@ -36,14 +36,13 @@ end
 
 is_creation_command(fdef) = startswith(fdef.name, "vkCreate")
 
+arguments(fdef::FDefinition) = filter(x -> !is_parameter(x.name, fdef.name) && !is_count_variable(x.name, fdef.name), fdef.signature.args)
+
 function wrap_enumeration_command(fdef)
     enumerated_type = last(enumeration_command_counts[fdef.name])
-    args = arguments(fdef)[1:end - 2] # skip future args count and arr
-    old_kwargs = PositionalArgument[]
-    for arg ∈ fdef.signature.args
-        is_parameter(arg.name, fdef.name) && push!(old_kwargs, arg)
-    end
-    kwargs = KeywordArgument.(fieldname_transform.(names(old_kwargs), types(old_kwargs)), nothing)
+    args = arg_transform.(arguments(fdef)[1:end-1])
+    old_kwargs = filter(x -> is_parameter(x.name, fdef.name), fdef.signature.args)
+    kwargs = arg_transform.(old_kwargs)
     fname = name_transform(fdef)
     sig = Signature(fname, args, kwargs)
     body = Statement[]
@@ -61,7 +60,6 @@ function wrap_enumeration_command(fdef)
             transform = "pointer($new_name)"
             push!(command_args, is_parameter(name, fdef.name) ? "isnothing($new_name) ? $(optional_parameter_default_value(name, fdef.name)) : $transform" : transform)
         elseif is_parameter(name, fdef.name)
-            push!(command_args, new_name)
             push!(command_args, new_name)
         end
     end
@@ -102,7 +100,7 @@ function wrap_creation_command(fdef)
     created_el_type = inner_type(last(types))
 
     created_el_name = last(names)
-    created_el_new_type = fieldtype_transform(created_el_name, created_el_type, fdef)
+    created_el_new_type = fieldtype_transform(created_el_name, created_el_type, fdef.name)
     created_el_new_name = fieldname_transform(created_el_name, created_el_type)
     ref = Statement("$created_el_name = Ref{$created_el_type}()", created_el_name)
     create_info_arg = "create_info"

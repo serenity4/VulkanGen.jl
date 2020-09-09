@@ -23,6 +23,8 @@ function PositionalArgument(decl::AbstractString)
     PositionalArgument(name, type)
 end
 
+Base.convert(T::Type{KeywordArgument}, arg::PositionalArgument) = T(arg.name, nothing)
+
 Base.names(arg::AbstractArray{<: Argument}) = getproperty.(arg, :name)
 types(arg::AbstractArray{PositionalArgument}) = getproperty.(arg, :type)
 

@@ -33,11 +33,11 @@ function structure(sdef)
         abstract_type = nothing
         for (name, type) ∈ sdef.fields
             discard_field(name, type, sdef) && continue
-            new_name, new_type = field_transform(name, type, sdef)
+            new_name, new_type = field_transform(name, type, sdef.name)
             new_type_ = is_optional_parameter(name, sdef.name) ? "Union{Nothing, $new_type}" : new_type
             new_fields[new_name] = new_type_
         end
-        if !is_enumerated_property(sdef)
+        if !is_enumerated_property(sdef.name)
             new_fields["vk"] = sdef.name
         end
     end
@@ -65,13 +65,14 @@ instance_name(sdef) = convert(SnakeCaseLower, sdef.name)
 
 
 "Convert a Ptr{T} to a fetch_known_type(T)."
-function convert_nested_type(type, sdef)
+function convert_nested_type(type)
     eltype = inner_type(type)
-    is_ptr(type) && is_vulkan_type(eltype) && return fieldtype_transform("", eltype, sdef)
-    is_ptr(type) && return "Ptr{$(fieldtype_transform("", eltype, sdef))}"
-    is_ntuple(type) && return replace(type, eltype => fieldtype_transform("", eltype, sdef))
+    is_ptr(type) && is_vulkan_type(eltype) && return fieldtype_transform("", eltype)
+    is_ptr(type) && return "Ptr{$(fieldtype_transform("", eltype))}"
+    is_ntuple(type) && return replace(type, eltype => fieldtype_transform("", eltype))
     error("Nested type $type is neither a pointer nor an array (pointer to pointer) type")
 end
+
 
 
 function type_dependencies(sdef::SDefinition)
@@ -79,8 +80,8 @@ function type_dependencies(sdef::SDefinition)
     isempty(type_deps) ? String[] : unique(vcat(type_deps...))
 end
 
-function field_transform(name, type, sdef)
-    new_type = fieldtype_transform(name, type, sdef)
+function field_transform(name, type, sname)
+    new_type = fieldtype_transform(name, type, sname)
     fieldname_transform(name, type) => new_type isa Converted ? new_type.final_type : new_type
 end
 
@@ -95,23 +96,23 @@ function fieldname_transform(name, type)
     convert(VulkanGen.julia_convention[:variable], cc).value
 end
 
-function fieldtype_transform(name, type, sdef)
+function fieldtype_transform(name, type, sname = nothing)
     startswith(type, "PFN_") && return "Function"
     occursin("version", lowercase(name)) && type == "UInt32" && return Converted(type, "VersionNumber")
     is_ntuple(type) && inner_type(type) == "UInt8" && return Converted(type, "AbstractString")
     @return_value_if_key_exists type_conversions type
-    is_array_variable(name, sdef.name) && return "AbstractArray{$(fieldtype_transform("", inner_type(type), sdef))}"
+    !isnothing(sname) && is_array_variable(name, sname) && return "AbstractArray{$(fieldtype_transform("", inner_type(type), sname))}"
     is_vulkan_type(type) && return remove_vk_prefix(type)
     (isnothing(type) || type == "Any") && return "Any"
-    convert_nested_type(type, sdef)
+    convert_nested_type(type)
 end
 
 property_exceptions = [
     "VkPhysicalDeviceLimits"
 ]
 
-function is_enumerated_property(sdef)
-    (any(enumeration_command_counts[f][2] == sdef.name for f ∈ keys(enumeration_command_counts)) && !is_handle(sdef.name)) || occursin("Properties", sdef.name) || sdef.name ∈ property_exceptions
+function is_enumerated_property(sname)
+    (any(enumeration_command_counts[f][2] == sname for f ∈ keys(enumeration_command_counts)) && !is_handle(sname)) || occursin("Properties", sname) || sname ∈ property_exceptions
 end
 
 discard_field(name, type, sdef) = name ∈ dropped_fields || is_count_variable(name, sdef.name)

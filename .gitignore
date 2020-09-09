@@ -4,3 +4,4 @@ resolution_graph.txt
 JuliaSysimage.so
 Manifest.toml
 *.code-workspace
+/.vscode

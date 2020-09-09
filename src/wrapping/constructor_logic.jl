@@ -1,9 +1,9 @@
 function constructor(api, new_sdef, sdef)
     defs, keys = [], []
-    if is_enumerated_property(sdef) || (is_handle(sdef.name) && !is_handle_with_create_info(sdef.name))
+    if is_enumerated_property(sdef.name) || (is_handle(sdef.name) && !is_handle_with_create_info(sdef.name))
         push!(defs, conversion(api, new_sdef, sdef, ConvertVkStructure()))
     end
-    if !is_enumerated_property(sdef)
+    if !is_enumerated_property(sdef.name)
         if is_handle(sdef.name)
             # cons = constructor(api, new_sdef, sdef, ConstructorWithCreateInfo())
         else
@@ -63,7 +63,7 @@ end
 end
 
 @preprocess_pass struct DefineSelfPointers <: Pass
-    new_sdef
+    new_sname
     pass!
 end
 struct GeneratePointers <: Pass end
@@ -79,11 +79,13 @@ end
     new_name
     new_type
     sdef
+    fdef
     count_arg
     array_arg
     last_name
     tmp_name
     passes
+    sname
 end
 
 struct PassResult{T <: Pass}
@@ -91,6 +93,8 @@ struct PassResult{T <: Pass}
     pass_args::PassArgs
     is_triggered::Bool
 end
+
+PassResult(pass::Pass, pass_args::PassArgs) = PassResult(pass, pass_args, is_triggered(typeof(pass), pass_args))
 
 # take the vulkan ID symbol if assigned, else take the julian ID symbol e.g. if pAllocator is assigned to the julian name allocator then return pAllocator; else, return allocator
 function last_argname(body, id, fallback)
@@ -122,19 +126,42 @@ function annotate_pass(statements, pass)
     Statement.(rstrip.(body_statements, '\n') .* "    # $(typeof(pass).name)" .* map(x -> endswith(x, "\n") ? "\n" : "", body_statements), getproperty.(statements, :assigned_id))
 end
 
+function inline_getproperty(name, type, sname)
+    (name == "sType" || is_enum(type) || is_bitmask(type) || is_base_type(type) || is_base_type(converted_type(fieldtype_transform(name, type, sname))) || is_optional_parameter(name, sname)) && return ""
+    is_handle(type) && return ".handle"
+    is_vulkan_type(type) && return ".vk"
+    ""
+end
+
+function init_args(pass_results, body; use_all_args=true, take_property=true)
+    args = String[]
+    for (name, pr_list) ∈ pass_results
+        pass_args = last(pr_list).pass_args
+        @unpack tmp_name, new_name, type, new_type, sname = pass_args
+        if (!any(values(pass_args.passes)) || use_all_args)
+            push!(args, last_argname(body, tmp_name, new_name) * (take_property ? inline_getproperty(name, type, sname) : ""))
+        end
+    end
+    args
+end
+
 is_enabled(pass::Type{T}, args::PassArgs) where {T <: Pass} = any(isa.(Ref(T), keys(args.passes)))
 is_triggered(pass::Type{T}, args::PassArgs) where {T <: Pass} = is_enabled(pass, args) && args.passes[pass]
+
+pass_new_nametype(::Type{SDefinition}) = (name, type, sname) -> (fieldname_transform(name, type), fieldtype_transform(name, type, sname))
 
 function constructor(api, new_sdef, sdef, definition::GenericConstructor)
     kwargs, opt_params = parameters(api, sdef)
     args = filter(x -> x.name ∉ ["vk", getproperty.(kwargs, :name)...], arguments(api, sdef))
     vk_sig = Signature(sdef)
-    init_args, body, pass_results = accumulate_passes(sdef, [AddDefaults(opt_params), TranslateVkTypesBack(), ComputeLengthArgument(), ReplaceStructureType(), DefineSelfPointers(new_sdef), ConvertArrays(), GeneratePointers()], init_args_append_field=true)
+    passes = [AddDefaults(opt_params), TranslateVkTypesBack(), ComputeLengthArgument(), ReplaceStructureType(), DefineSelfPointers(new_sdef.name), ConvertArrays(), GeneratePointers()]
+    body, pass_results = accumulate_passes(sdef.name, vk_sig, pass_new_nametype(SDefinition), passes, common_pass_kwargs=(; sdef))
+    vk_args = init_args(pass_results, body, use_all_args=true, take_property=true)
     default_co_sig = Signature(new_sdef)
     co_sig = Signature(new_sdef.name, args, kwargs)
-    ptr_args = filter(arg -> pass_results[arg][GeneratePointers].is_triggered, argnames(vk_sig))
+    ptr_args = filter(arg -> pass_results[arg][findfirst(x -> x isa GeneratePointers, passes)].is_triggered, argnames(vk_sig))
     final_argnames = map(x -> x ∈ ptr_args ? "$x[]" : x, argnames(default_co_sig))
-    push!(body, Statement("vk = $(vk_sig.name)($(join_args(init_args)))\n", "vk"))
+    push!(body, Statement("vk = $(vk_sig.name)($(join_args(vk_args)))\n", "vk"))
     push!(body, Statement("$(default_co_sig.name)($(join_args(final_argnames)))", nothing))
     FDefinition(new_sdef.name, co_sig, length(body) == 1, body, "GenericConstructor")
 end
@@ -157,36 +184,35 @@ function constructor(api, new_sdef, sdef, ::CreateVkHandle; create_info_sdef, cr
     FDefinition(new_sig.name, new_sig, false, body, "CreateVkHandle")
 end
 
-function accumulate_passes(sdef, passes; use_all_args=true, init_args_append_field=false)
-    init_args = []
+converted_type(type) = type
+converted_type(type::Converted) = type.final_type
+
+function accumulate_passes(sname, sig, new_nametype, passes; common_pass_kwargs=())
     body = Statement[]
-    vk_sig = Signature(sdef)
-    pass_results = OrderedDict(argnames(vk_sig) .=> Ref(OrderedDict()))
+    pass_results = DefaultOrderedDict(() -> [])
     @assert unique(typeof.(passes)) == typeof.(passes) "A Pass type cannot be provided more than once"
-    for (name, type) ∈ zip(argnames(vk_sig), argtypes(vk_sig))
-        count_arg = count_variable(name, sdef.name)
+    for (name, type) ∈ zip(argnames(sig), argtypes(sig))
+        count_arg = count_variable(name, sname)
         tmp_name = tmp_argname(name, type)
-        new_name, new_type = field_transform(name, type, sdef)
-        array_arg = isnothing(count_arg) ? array_variable(name, sdef.name) : associated_array_variable(count_arg, sdef.name)
-        pass_args = PassArgs(name, type, fieldname_transform(name, type), fieldtype_transform(name, type, sdef), sdef, count_arg, array_arg, last_argname(body, tmp_name, new_name), tmp_name, Dict(typeof.(passes) .=> false))
+        new_name, new_type = new_nametype(name, type, sname)
+        array_arg = isnothing(count_arg) ? array_variable(name, sname) : associated_array_variable(count_arg, sname)
+        pass_args = PassArgs(; name, type, new_name, new_type, sdef=nothing, fdef=nothing, count_arg, array_arg, last_name=last_argname(body, tmp_name, new_name), tmp_name, passes=Dict(typeof.(passes) .=> false), sname)
+        setproperty!.(Ref(pass_args), keys(common_pass_kwargs), values(common_pass_kwargs))
         for el ∈ passes
             pass_func = hasfield(typeof(el), :pass!) ? el.pass! : pass! # prioritize preprocessed pass inside struct
             body_statements = pass_func(pass_args, typeof(el))
             if !isnothing(body_statements) && typeof(body_statements) != Bool
                 body_statements = typeof(body_statements) <: AbstractArray ? body_statements : Statement[body_statements]
                 body_statements = annotate_pass(body_statements, el)
-                # append!(init_args, filter(x -> !isnothing(x) && x ∉ init_args, getproperty.(body_statements, :assigned_id)))
                 append!(body, body_statements)
                 pass_args.passes[typeof(el)] = true
             end
+            push!(pass_results[name], PassResult(el, deepcopy(pass_args)))
             pass_args.last_name = last_argname(body, tmp_name, new_name)
-            pass_results[name][typeof(el)] = PassResult(el, pass_args, is_triggered(typeof(el), pass_args))
         end
-        if (!any(values(pass_args.passes)) || use_all_args)
-            push!(init_args, last_argname(body, tmp_name, new_name) * (!init_args_append_field || name == "sType" || is_enum(type) || is_bitmask(type) || is_base_type(type) || is_base_type(new_type) || is_optional_parameter(name, sdef.name) ? "" : is_handle(type) ? ".handle" : is_vulkan_type(type) ? ".vk" : ""))
-        end
+        @assert length(passes) == length(pass_results[name]) "Number of passes ($(length(passes))) and pass_results ($(length(pass_results[name]))) differ for $name ($sname)"
     end
-    init_args, body, pass_results
+    body, pass_results
 end
 
 function conversion(api, new_sdef, sdef, ::ConvertVkStructure)
@@ -196,12 +222,12 @@ function conversion(api, new_sdef, sdef, ::ConvertVkStructure)
 end
 
 function conversion(api, new_sdef, sdef, passes, converted_var_name)
-    init_args = []
     fname = "Base.convert"
     args = PositionalArgument.(["T::Type{$(new_sdef.name)}", "$converted_var_name::$(sdef.name)"])
     new_sig = Signature(fname, args, [])
-    init_args, body, pass_results = accumulate_passes(sdef, passes)
-    push!(body, Statement("$(new_sdef.name)($(join_args(init_args)))", nothing))
+    body, pass_results = accumulate_passes(sdef.name, Signature(sdef), pass_new_nametype(SDefinition), passes, common_pass_kwargs=(; sdef))
+    args_init = init_args(pass_results, body, take_property=false)
+    push!(body, Statement("$(new_sdef.name)($(join_args(args_init)))", nothing))
     FDefinition(fname, new_sig, false, body)
 end
 
@@ -243,9 +269,9 @@ function pass!(args::PassArgs, ::Type{ReplaceStructureType})
     name == "sType" && return Statement("sType = $(stypes[sdef.name])\n", "sType")
 end
 
-function pass!(args::PassArgs, ::Type{DefineSelfPointers}; new_sdef)
+function pass!(args::PassArgs, ::Type{DefineSelfPointers}; new_sname)
     @unpack name, tmp_name = args
-    startswith(name, "p") && lstrip(name, 'p') == new_sdef.name && return Statement("$tmp_name = Ref{$(sdef.name)}()", tmp_name)
+    startswith(name, "p") && lstrip(name, 'p') == new_sname && return Statement("$tmp_name = Ref{$(sdef.name)}()", tmp_name)
 end
 
 function pass!(args::PassArgs, ::Type{ConvertArrays})
@@ -268,7 +294,7 @@ function preserved_pointer_statements(refname, reffed_obj, preserving_obj, assig
 end
 
 function pass!(args::PassArgs, ::Type{GeneratePointers})
-    @unpack type, name, tmp_name, new_name, new_type, last_name, sdef, passes = args
+    @unpack type, name, tmp_name, new_name, new_type, last_name, passes = args
     if !is_triggered(DefineSelfPointers, args) && startswith(name, r"p{1,2}[A-Z]")
         arg_check = is_abstractarray_type(new_type) ? "!isempty($last_name)" : name == "pNext" ? "next ≠ C_NULL" : "!isnothing($new_name)"
         refname = "$(last_name)_ref"
@@ -355,7 +381,7 @@ function arguments(api, sdef::SDefinition)
     for (name, type) ∈ sdef.fields
         discard_field(name, type, sdef) && continue
         is_parameter(name, api, sdef) && continue
-        new_name, new_type = fieldname_transform(name, type), fieldtype_transform(name, type, sdef)
+        new_name, new_type = fieldname_transform(name, type), fieldtype_transform(name, type, sdef.name)
         if occursin("CreateInfo", name) && occursin("CreateInfo", type) && !is_ptr(type)
             append!(args, arguments(api, api.structs[type])) # get arguments from the create_info struct
         else
