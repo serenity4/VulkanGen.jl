@@ -55,7 +55,7 @@ type_conversions = Dict(
     "Cstring" => "String",
     "Cuint" => "UInt32",
     "VkBool32" => "Bool",
-    "Ptr{Cstring}" => "AbstractArray{String}",
+    "Ptr{Cstring}" => "Array{String}",
     "NTuple{256, UInt8}" => "String",
     "NTuple{16, UInt8}" => "String",
     "Ptr{Cvoid}" => "Ptr{Cvoid}",
@@ -66,7 +66,8 @@ type_conversions = Dict(
     "Ptr{xcb_connection_t}" => "Ptr{Cvoid}",
     "xcb_window_t" => "UInt32",
     "Window" => "UInt32",
-    "Ptr{Display}" => "Ptr{Cvoid}"
+    "Ptr{Display}" => "Ptr{Cvoid}",
+    "void" => "Any"
     # "Ptr{Cfloat}" => "AbstractArray{<:Number}",
 )
 
@@ -100,7 +101,7 @@ base_types = [
     "AbstractArray",
     "AbstractString",
     "Any",
-
+    "",
 ]
 
 function widen_type(type)
@@ -112,14 +113,16 @@ function widen_type(type)
 end
 
 is_ptr_to_ptr(type) = startswith(type, "Ptr{Ptr{")
-is_ptr(type) = startswith(type, "Ptr{") || type == "Cstring"
+is_ptr(type) = startswith(type, "Ptr{")
 is_ntuple(type) = startswith(type, "NTuple{")
 
 is_vulkan_type(name) = any(startswith.(Ref(name), ["vk", "Vk", "VK_"]))
+is_vulkan_struct(name) = name ∈ keys(api.structs)
 is_base_type(name) = name ∈ base_types || is_literal(name)
 is_literal(el) = occursin(r"[\.\"]+", el) || occursin(r"^\d+$", el)
 is_expr(el) = occursin(r"[\(\)~\[\]]", el)
 is_abstractarray_type(el) = startswith(el, "AbstractArray")
+is_array_type(el) = startswith(el, "Array")
 
 
 "Returns all the leaf types that a type depends on, including itself if the type contains no inner type."
@@ -136,7 +139,5 @@ function inner_type(type)
     is_ntuple(type) && return last(type_deps) # ignore number of repetitions at index 1
     error("Cannot take inner type of $type")
 end
-
-remove_lib_prefix(str) = replace(str, lib_prefix * "." => "")
 
 is_opaque(ptr) = ptr == Ptr{Nothing}

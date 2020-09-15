@@ -54,14 +54,16 @@ function Signature(f)
     Signature(first(ms))
 end
 
-typed_field(name, type) = isnothing(type) ? name : join([name, type], "::") 
+typed_field(name, type) = isnothing(type) || isempty(type) ? name : join([name, type], "::") 
 function decompose_field_decl(typed_field)
     parts = split(typed_field, "::")
     length(parts) == 1 ? parts[1] => nothing : parts[1] => parts[2]
 end
 
-Base.join(args::Argument...) = join(map(typed_field, getproperty.(args, :name), getproperty.(args, :type)), ", ")
-Base.join(args::KeywordArgument...) = join(map((x, y) -> join([x, y], "="), getproperty.(args, :name), getproperty.(args, :default)), ", ")
-Base.show(io::IO, sig::Signature) = print(io, sig.name, "(", join(sig.args...), isempty(sig.kwargs) ? "" : ("; " * join(sig.kwargs...)), ")")
+Base.string(arg::KeywordArgument) = arg.name * (isnothing(arg.default) ? "" : "=" * arg.default)
+Base.string(arg::PositionalArgument) = typed_field(arg.name, arg.type)
+Base.join(args::AbstractArray{<: Argument}) = join_args(string.(args))
+Base.show(io::IO, sig::Signature) = print(io, sig.name, "(", join(sig.args), isempty(sig.kwargs) ? "" : ("; " * join(sig.kwargs)), ")")
 
-generate(sig::Signature) = join([sig.name, "(", join(sig.args...), isempty(sig.kwargs) ? "" : ("; " * join(sig.kwargs...)), ")"])
+
+generate(sig::Signature) = join([sig.name, "(", join(sig.args), isempty(sig.kwargs) ? "" : ("; " * join(sig.kwargs)), ")"])

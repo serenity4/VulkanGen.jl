@@ -3,16 +3,13 @@ function fetch_cardinality_groups(xroot)
     cardinalities_func = findall("//param[@len!='null-terminated']", xroot)
     cardinalities_to_group = []
     for card ∈ cardinalities_struct
-        push!(cardinalities_to_group, (struct_name(card), haskey(card, "altlen") ? card["altlen"] : card["len"], nodecontent(findfirst("name", card))))
+        push!(cardinalities_to_group, (struct_name(card.parentelement), haskey(card, "altlen") ? card["altlen"] : card["len"], nodecontent(findfirst("name", card))))
     end
     for card ∈ cardinalities_func
         push!(cardinalities_to_group, (command_name(card), haskey(card, "altlen") ? card["altlen"] : card["len"], nodecontent(findfirst("name", card))))
     end
     group_cardinalities(cardinalities_to_group)
 end
-
-command_name(param_node) = param_node.parentelement.firstelement.firstelement.nextelement.content
-struct_name(member_node) = member_node.parentnode["name"]
 
 """Create a dictionary relating pointer variables to their cardinality.
 
@@ -30,8 +27,6 @@ function group_cardinalities(arr)
     end
 
     dict = OrderedDict(p1 => p2 for (p1, p2) ∈ zip(unique_names, dict_pairs))
-    # dict["VkShaderModuleCreateInfo"] =  ["codeSize" => "pCode * 4"]
-    # dict["VkPipelineMultisampleStateCreateInfo"] = ["rasterizationSamples" => "pSampleMask * 32"]
     dict
 end
 
@@ -81,6 +76,15 @@ function default(name, type)
     "0"
 end
 
+"""
+    associated_array_variable(name, sname)
+
+# Examples
+```
+julia> associated_array_variable("enabledLayerCount", "VkInstanceCreateInfo")
+"ppEnabledLayerNames"
+```
+"""
 function associated_array_variable(count_var_name, sname)
     els = cardinality_groups[sname]
     for el ∈ els
@@ -104,7 +108,7 @@ function group_optional_parameters(params)
 end
 
 function fetch_optional_parameters(xroot)
-    member_nodes = findall("//member[@optional='true']", xroot)
+    member_nodes = findall("//member[@optional='true' or ./child::name = 'pNext']", xroot)
     param_nodes = findall("//param[@optional='true']", xroot)
     optional_parameters = []
     for param ∈ member_nodes

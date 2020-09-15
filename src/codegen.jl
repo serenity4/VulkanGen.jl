@@ -11,11 +11,18 @@ struct Statement
 end
 
 
-struct SDefinition <: Declaration
+mutable struct SDefinition <: Declaration
     name::AbstractString
     is_mutable::Bool
     fields::OrderedDict
     abstract_type
+    inner_constructor
+    function SDefinition(name, is_mutable, fields, abstract_type, inner_constructor)
+        if !isnothing(inner_constructor)
+            @assert inner_constructor.name == name
+        end
+        new(name, is_mutable, fields, abstract_type, inner_constructor)
+    end
 end
 
 
@@ -50,9 +57,9 @@ function generate(edef::EDefinition)
 end
 
 Statement(body::AbstractString) = Statement(strip(body), nothing)
-SDefinition(name::AbstractString, is_mutable::Bool, fields::OrderedDict) = SDefinition(name, is_mutable, fields, nothing)
+SDefinition(name::AbstractString, is_mutable::Bool, fields::OrderedDict) = SDefinition(name, is_mutable, fields, nothing, nothing)
 SDefinition(name::AbstractString, is_mutable::Bool; fields=()) = SDefinition(name, is_mutable, OrderedDict(fields))
-Signature(sdef::SDefinition) = Signature(sdef.name, PositionalArgument.(keys(sdef.fields), values(sdef.fields)), KeywordArgument[])
+Signature(sdef::SDefinition) = isnothing(sdef.inner_constructor) ? Signature(sdef.name, PositionalArgument.(keys(sdef.fields), values(sdef.fields)), KeywordArgument[]) : sdef.inner_constructor.signature
 
 function extract_args(str)
     split_str = split(str, ";") # get kwargs first
@@ -121,12 +128,15 @@ end
 function generate(s::SDefinition)
     def = (s.is_mutable ? "mutable " : "") * "struct $(s.name)" * (isnothing(s.abstract_type) ? "" : "<: $(s.abstract_type)")
     fields = join(typed_field.(keys(s.fields), values(s.fields)), "\n")
-    format_text("$def $fields end")
+    inner_constructor = isnothing(s.inner_constructor) ? "" : "\n" * generate(s.inner_constructor) * "\n"
+    format_text("$def $fields $inner_constructor end")
 end
 
 function generate(f::FDefinition)
     body = generate(f.body)
-    docstring = isempty(f.docstring) ? "" : "\"$(f.docstring)\"\n"
+    docstring = isempty(f.docstring) ? "" : """\"\"\"
+    $(f.docstring)
+    \"\"\"\n"""
     if f.short
         str = docstring * generate(f.signature) * " = " * body
     else

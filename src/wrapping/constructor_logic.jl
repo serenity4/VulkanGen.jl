@@ -1,93 +1,147 @@
-function constructor(api, new_sdef, sdef)
-    defs, keys = [], []
-    if is_enumerated_property(sdef.name) || (is_handle(sdef.name) && !is_handle_with_create_info(sdef.name))
-        push!(defs, conversion(api, new_sdef, sdef, ConvertVkStructure()))
-    end
-    if !is_enumerated_property(sdef.name)
-        if is_handle(sdef.name)
-            # cons = constructor(api, new_sdef, sdef, ConstructorWithCreateInfo())
-        else
-            cons = constructor(api, new_sdef, sdef, GenericConstructor())
-            push!(defs, cons)
-        end
-    end
-    defs, constructor_key.(Ref(sdef), is_conversion.(defs))
-end
-
-function constructor_key(sdef, is_conversion)
-    fname = sdef.name
-    if is_conversion
-        if is_handle(fname)
-            "convert_handle_" * (occursin("Type{Ptr{Nothing}}", fname) ? "opaque_" : "") * fname
-        else
-            "convert_" * fname
-        end
+function constructor(new_sdef, sdef)
+    defs = []
+    sname = sdef.name
+    if is_handle(sname)
+        # new_sdef.inner_constructor = constructor(new_sdef, sdef, CreateVkHandle())
+        # push!(defs, constructor(new_sdef, sdef, CreateVkHandleWithCreateInfo()))
     else
-        fname
+        new_sdef.inner_constructor = constructor(new_sdef, sdef, GenericConstructor())
+        # push!(defs, conversion(new_sdef, sdef, ConvertVkStructure()))
+        # for dep ∈ vk_dependencies(sname)
+        #     if !is_enumerated_property(dep)
+        #         push!(defs, conversion(structure(api.structs[dep]), api.structs[dep], ConvertVkStructure()))
+        #         push!(defs, constructor(new_sdef, sdef, GenericConstructor()))
+        #     end
+        # end
     end
+    defs
 end
 
-function wrap_constructor!(w_api, api, new_sdef, sdef)
-    defs, keys = constructor(api, new_sdef, sdef)
-    for (def, key) ∈ zip(defs, keys)
-        w_api.funcs[key] = def
+function wrap_constructor!(w_api, new_sdef, sdef)
+    defs = constructor(new_sdef, sdef)
+    for (i, def) ∈ enumerate(defs)
+        w_api.funcs[sdef.name * "_$i"] = def
+    end
+    if !is_handle(sdef.name)
+        vk_extended_constructor = constructor(sdef, ExtendVkConstructor())
+        length(vk_extended_constructor.signature.args) ≠ length(sdef.fields) && setindex!(w_api.extended_vk_constructors, vk_extended_constructor, sdef.name)
     end
 end
 
 """
 Pass type used to build the body of a function.
 
-For each field of a structure, passes are layed out on top of one another to construct statements, that will define a major part of a constructor function body. All passes operate from a common set of parameters bundled in a PassArgs structure.
+For each argument of a function, passes are layed out on top of one another to construct statements, that will define a major part of the function body. All passes receive a common set of parameters bundled in a PassArgs argument.
 
 Passes that are triggered upon a field yield one or more statements.
 """
 abstract type Pass end
+
+"""
+Translate wrapped types to Vulkan types. Triggers on Strings (converted to Cstrings) and Arrays (converted to their Ptr representation).
+"""
 struct TranslateVkTypesBack <: Pass end
+
+"""
+Compute the length of an array (for example, exposed in a wrapped type), which is required for *Count variables.
+"""
 struct ComputeLengthArgument <: Pass end
-struct ReplaceStructureType <: Pass end
+
+"""
+Convert arrays to their expected type. For example, converts an Array{Int64} to an Array{UInt32}.
+"""
 struct ConvertArrays <: Pass end
-@preprocess_pass struct AutomateCreateInfo <: Pass
-    create_info_sdef
-    create_info_new_sdef
-    pass!
+
+"""
+Translate Vulkan types into wrapped types. For example, takes a Cstring or a NTuple{256, UInt8} and converts it back to a String; or takes a Ptr{T} which encodes an array and converts it back to an array, to be safely stored inside a wrapped struct.
+"""
+struct TranslateVkTypes <: Pass end
+
+"""
+Handle the integration of pNext dependencies. Fill the `extra_bag` field of the struct to be created with either `next.bag` or `EmptyBag` (if `C_NULL`)
+"""
+struct HandlePNextDeps <: Pass end
+
+"""
+Generate a new variable with either a Ref or `C_NULL` for each pointer argument.
+"""
+struct GenerateRefs <: Pass end
+
+"""
+Generate a pointer for any variable beginning with p[A-Z].
+"""
+struct GeneratePointers <: Pass end
+
+function has_bag(sname)
+    !is_handle(sname) && is_vulkan_struct(sname)
 end
 
-@preprocess_pass struct TranslateVkTypes <: Pass
-    converted_arg_namespace
-    pass!
+function bagtype(sname)
+    return "Bag" * name_transform(sname, SDefinition)
 end
 
-@preprocess_pass struct TakeConversionArgsFromVkVar <: Pass
-    vk_var_name
-    pass!
+function instantiate_bag(sdef, body)
+    !has_bag(sdef.name) && error("Type $(sdef.name) does not have a bag to instantiate.")
+    bag_args = String[]
+    if "pNext" ∈ keys(sdef.fields)
+        push!(bag_args, "bag_next")
+    end
+    for (name, type) ∈ sdef.fields
+        new_name, new_type = field_transform(name, type, sdef.name)
+        tmp_name = tmp_argname(name, type)
+        last_name = last_argname(body, tmp_name, new_name)
+        if has_bag(type) || (is_ptr(type) && has_bag(inner_type(type)))
+            push!(bag_args, new_name * ".bag")
+        end
+        if type == "Cstring" || is_ptr(type)
+            push!(bag_args, last_name)
+        end
+    end
+    bag = bagtype(sdef.name)
+    Statement("bag = $bag($(join_args(bag_args)))", "bag")
 end
 
+# @preprocess_pass struct AutomateCreateInfo <: Pass
+#     create_info_sdef
+#     create_info_new_sdef
+#     pass!
+# end
+
+"""
+Check whether an argument matches by name a pointer to the type defined in `new_sname`, and returns a default Ref of the corresponding type.
+"""
 @preprocess_pass struct DefineSelfPointers <: Pass
     new_sname
     pass!
 end
-struct GeneratePointers <: Pass end
 
-@preprocess_pass struct AddDefaults <: Pass
-    opt_params
-    pass!
-end
+# @preprocess_pass struct AddDefaults <: Pass
+#     opt_params
+#     pass!
+# end
 
+"""
+Encode possible arguments available for each Pass.
+"""
 @with_kw mutable struct PassArgs
-    name
-    type
-    new_name
-    new_type
-    sdef
-    fdef
-    count_arg
-    array_arg
-    last_name
-    tmp_name
-    passes
-    sname
+    name = nothing
+    type = nothing
+    new_name = nothing
+    new_type = nothing
+    sdef = nothing
+    fdef = nothing
+    arg = nothing
+    count_arg = nothing
+    array_arg = nothing
+    last_name = nothing
+    tmp_name = nothing
+    passes = nothing
+    sname = nothing
 end
 
+"""
+Store the result of a Pass, recording its triggered state and the PassArgs that was passed to it.
+"""
 struct PassResult{T <: Pass}
     pass::T
     pass_args::PassArgs
@@ -96,53 +150,82 @@ end
 
 PassResult(pass::Pass, pass_args::PassArgs) = PassResult(pass, pass_args, is_triggered(typeof(pass), pass_args))
 
-# take the vulkan ID symbol if assigned, else take the julian ID symbol e.g. if pAllocator is assigned to the julian name allocator then return pAllocator; else, return allocator
+"""
+Return a Vulkan name if assigned from any statement in the body, else take the Julian name
+
+For example, if a statement assigns the name pAllocator from the Julian name allocator, as in 'pAllocator = allocator.vks', then return pAllocator; else, return allocator.
+"""
 function last_argname(body, id, fallback)
     id_list = getproperty.(body, :assigned_id)
     id ∈ id_list ? id : fallback
 end
 
-function tmp_argname(name, type)
-    new_name = fieldname_transform(name, type)
-    name == new_name ? "_" * new_name : name
+function last_argname(body, ids::Tuple, fallback)
+    id_list = getproperty.(body, :assigned_id)
+    for id ∈ ids
+        id ∈ id_list && return id
+    end
+    fallback
 end
+
+
 
 abstract type ConstructorDefinition end
 struct GenericConstructor <: ConstructorDefinition end
+
+"""
+Extends the original Vulkan type by adding a constructor with Refs, Strings and arrays instead of pointers and converting them to the expected type. It was added to improve performance, since some keyword arguments (notably, pointers with a default value of `C_NULL`) do not have a stable type.
+"""
+struct ExtendVkConstructor <: ConstructorDefinition end
+
+"""
+It is assumed that the Vk*CreateInfos are provided and that only vkCreate* and vkDestroy* are required in order to build the struct. Therefore, it mainly wraps the vkCreate* function and adds the corresponding vkDestroy* finalizer.
+"""
 struct CreateVkHandle <: ConstructorDefinition end
-struct ConstructorWithCreateInfo <: ConstructorDefinition end
+
+"""
+It adds a constructor which exposes the parameters of Vk*CreateInfo fields before calling the handle's inner constructor.
+"""
+struct CreateVkHandleWithCreateInfo <: ConstructorDefinition end
 
 abstract type ConversionDefinition end
+
+"""
+Converts a Vk* struct to its corresponding wrapped struct. It is particularly useful for structs that are returned from a Vulkan function (such as vkEnumeratePhysicalDeviceProperties => VkPhysicalDeviceProperties).
+"""
 struct ConvertVkStructure <: ConversionDefinition end
-
-is_conversion(def) = startswith("Base.convert", def.name)
-
-
 
 preprocess_pass(pass_type::Type{T}; kwargs...) where {T <: Pass} = (pass_args, T) -> pass!(pass_args, T; kwargs...)
 
-function annotate_pass(statements, pass)
-    body_statements = getproperty.(statements, :body)
-    Statement.(rstrip.(body_statements, '\n') .* "    # $(typeof(pass).name)" .* map(x -> endswith(x, "\n") ? "\n" : "", body_statements), getproperty.(statements, :assigned_id))
-end
 
-function inline_getproperty(name, type, sname)
-    (name == "sType" || is_enum(type) || is_bitmask(type) || is_base_type(type) || is_base_type(converted_type(fieldtype_transform(name, type, sname))) || is_optional_parameter(name, sname)) && return ""
+function inline_getproperty(type)
+    # (name == "sType" || is_enum(type) || is_bitmask(type) || is_base_type(type) || is_base_type(converted_type(fieldtype_transform(name, type, sname))) || is_optional_parameter(name, sname)) && return ""
     is_handle(type) && return ".handle"
-    is_vulkan_type(type) && return ".vk"
+    is_vulkan_struct(type) && return ".vks"
     ""
 end
 
-function init_args(pass_results, body; use_all_args=true, take_property=true)
+"""
+Get initialization arguments from the results of `accumulate_passes`.
+"""
+function init_args(pass_results, body; use_all_args=true, take_property=true, include_stype=true, name_depth=2)
     args = String[]
     for (name, pr_list) ∈ pass_results
         pass_args = last(pr_list).pass_args
         @unpack tmp_name, new_name, type, new_type, sname = pass_args
-        if (!any(values(pass_args.passes)) || use_all_args)
-            push!(args, last_argname(body, tmp_name, new_name) * (take_property ? inline_getproperty(name, type, sname) : ""))
+        if name == "sType" && include_stype
+            push!(args, stypes[sname])
+        elseif (!any(values(pass_args.passes)) || use_all_args)
+            push!(args, last_argname(body, name_hierarchy(name_depth, name, tmp_name, new_name)...) * (take_property ? inline_getproperty(type) : ""))
         end
     end
     args
+end
+
+function name_hierarchy(name_depth, names...)
+    length(names) == 1 && return (), names[1]
+    @assert name_depth < length(names)
+    names[1:name_depth], names[name_depth + 1]
 end
 
 is_enabled(pass::Type{T}, args::PassArgs) where {T <: Pass} = any(isa.(Ref(T), keys(args.passes)))
@@ -150,27 +233,31 @@ is_triggered(pass::Type{T}, args::PassArgs) where {T <: Pass} = is_enabled(pass,
 
 pass_new_nametype(::Type{SDefinition}) = (name, type, sname) -> (fieldname_transform(name, type), fieldtype_transform(name, type, sname))
 
-function constructor(api, new_sdef, sdef, definition::GenericConstructor)
-    kwargs, opt_params = parameters(api, sdef)
-    args = filter(x -> x.name ∉ ["vk", getproperty.(kwargs, :name)...], arguments(api, sdef))
+function constructor(new_sdef, sdef, definition::GenericConstructor)
     vk_sig = Signature(sdef)
-    passes = [AddDefaults(opt_params), TranslateVkTypesBack(), ComputeLengthArgument(), ReplaceStructureType(), DefineSelfPointers(new_sdef.name), ConvertArrays(), GeneratePointers()]
-    body, pass_results = accumulate_passes(sdef.name, vk_sig, pass_new_nametype(SDefinition), passes, common_pass_kwargs=(; sdef))
-    vk_args = init_args(pass_results, body, use_all_args=true, take_property=true)
-    default_co_sig = Signature(new_sdef)
+    sname = sdef.name
+    args, kwargs = arguments(vk_sig), keyword_arguments(vk_sig, expose_create_info_kwargs=false)
+    # @info "$(rpad(sdef.name * " ", 60, '\u2015'))" * "→ " * (isempty(kwargs) ? "" : join(kwargs))
     co_sig = Signature(new_sdef.name, args, kwargs)
-    ptr_args = filter(arg -> pass_results[arg][findfirst(x -> x isa GeneratePointers, passes)].is_triggered, argnames(vk_sig))
-    final_argnames = map(x -> x ∈ ptr_args ? "$x[]" : x, argnames(default_co_sig))
-    push!(body, Statement("vk = $(vk_sig.name)($(join_args(vk_args)))\n", "vk"))
-    push!(body, Statement("$(default_co_sig.name)($(join_args(final_argnames)))", nothing))
-    FDefinition(new_sdef.name, co_sig, length(body) == 1, body, "GenericConstructor")
+    default_sig = Signature(new_sdef)
+    sig_notype = Signature(new_sdef.name, remove_type.(default_sig.args), [])
+    args_for_passes = arguments(vk_sig, transform_name=false, transform_type=false, drop_type=false, remove_parameters=false)
+    body, pass_results = accumulate_passes(sname, args_for_passes, pass_new_nametype(SDefinition), [ConvertArrays(), GenerateRefs(), HandlePNextDeps()])
+    has_bag(sname) && push!(body, instantiate_bag(sdef, body))
+    init_vk = init_args(pass_results, body, use_all_args=true, include_stype=false, name_depth=2)
+    push!(body, Statement("vks = $sname($(join_args(init_vk)))"))
+    init_struct = ["vks"]
+    has_bag(sname) && push!(init_struct, "bag")
+    push!(body, Statement("new($(join_args(init_struct)))"))
+    FDefinition(new_sdef.name, co_sig, false, body, "Generic constructor.")
 end
 
-function constructor(api, new_sdef, sdef, ::CreateVkHandle; create_info_sdef, create_fun_fdef)
+function constructor(new_sdef, sdef, ::CreateVkHandle; create_info_sdef, create_fun_fdef)
     create_info_var = last(handle_creation_info[sdef.name])
+    vk_sig = Signature(sdef)
     create_fun_sig = create_fun_fdef.signature
-    kwargs_info, _ = parameters(create_info_sdef)
-    args_info = arguments_from_fields(create_info_sdef)
+    kwargs_info = parameters(vk_sig, expose_create_info_kwargs=true)
+    args_info = arguments(vk_sig)
     kwargs = [kwargs_info..., KeywordArgument("pAllocator", "C_NULL")]
     new_sig = Signature(new_sdef.name, args_info, kwargs)
     create_info_sig = Signature(create_info_sdef)
@@ -184,19 +271,33 @@ function constructor(api, new_sdef, sdef, ::CreateVkHandle; create_info_sdef, cr
     FDefinition(new_sig.name, new_sig, false, body, "CreateVkHandle")
 end
 
+function constructor(sdef, ::ExtendVkConstructor)
+    sname = sdef.name
+    sname_extended = "api." * sname
+    vk_sig = Signature(sdef)
+    args = arguments(vk_sig, remove_parameters=false)
+    # filter!(x -> x.name != "sType", args)
+    body, pass_results = accumulate_passes(sname, vk_sig.args, pass_new_nametype(SDefinition), [ComputeLengthArgument(), GeneratePointers(), TranslateVkTypesBack()])
+    init = init_args(pass_results, body, use_all_args=true, take_property=false)
+    push!(body, Statement("api.$(sdef.name)($(join_args(init)))"))
+    new_sig = Signature(sname_extended, args, KeywordArgument[])
+    FDefinition(sname_extended, new_sig, false, body, "Julian constructor for $(sdef.name). All struct pointers should be replaced by an equivalent Ref or `C_NULL`. The Refs need to be explicitly preserved during and after this call to keep the struct pointers valid.")
+end
+
 converted_type(type) = type
 converted_type(type::Converted) = type.final_type
 
-function accumulate_passes(sname, sig, new_nametype, passes; common_pass_kwargs=())
+function accumulate_passes(sname, args, new_nametype_f, passes; common_pass_kwargs=())
     body = Statement[]
     pass_results = DefaultOrderedDict(() -> [])
     @assert unique(typeof.(passes)) == typeof.(passes) "A Pass type cannot be provided more than once"
-    for (name, type) ∈ zip(argnames(sig), argtypes(sig))
+    for arg ∈ args
+        name, type = arg.name, arg.type
         count_arg = count_variable(name, sname)
         tmp_name = tmp_argname(name, type)
-        new_name, new_type = new_nametype(name, type, sname)
+        new_name, new_type = new_nametype_f(name, type, sname)
         array_arg = isnothing(count_arg) ? array_variable(name, sname) : associated_array_variable(count_arg, sname)
-        pass_args = PassArgs(; name, type, new_name, new_type, sdef=nothing, fdef=nothing, count_arg, array_arg, last_name=last_argname(body, tmp_name, new_name), tmp_name, passes=Dict(typeof.(passes) .=> false), sname)
+        pass_args = PassArgs(; name, type, arg, new_name, new_type, sdef=nothing, fdef=nothing, count_arg, array_arg, last_name=last_argname(body, tmp_name, new_name), tmp_name, passes=Dict(typeof.(passes) .=> false), sname)
         setproperty!.(Ref(pass_args), keys(common_pass_kwargs), values(common_pass_kwargs))
         for el ∈ passes
             pass_func = hasfield(typeof(el), :pass!) ? el.pass! : pass! # prioritize preprocessed pass inside struct
@@ -215,45 +316,54 @@ function accumulate_passes(sname, sig, new_nametype, passes; common_pass_kwargs=
     body, pass_results
 end
 
-function conversion(api, new_sdef, sdef, ::ConvertVkStructure)
-    var = is_handle(sdef.name) ? "vk_handle" : "vk_struct"
-    is_handle(sdef.name) && return FDefinition("Base.convert(T::Type{$(new_sdef.name)}, $var::$(sdef.name)) = $(new_sdef.name)($var)")
-    conversion(api, new_sdef, sdef, [TranslateVkTypes(var), TakeConversionArgsFromVkVar(var)], var)
+function conversion(new_sdef, sdef, T::ConvertVkStructure)
+    transformed_vars = transform_vars(sdef, T)
+    sig = conversion_sig(new_sdef.name, sdef.name, T)
+    body = [Statement("$(new_sdef.name)($(join_args(transformed_vars)))", nothing)]
+    FDefinition(sig.name, sig, false, body)
 end
 
-function conversion(api, new_sdef, sdef, passes, converted_var_name)
-    fname = "Base.convert"
-    args = PositionalArgument.(["T::Type{$(new_sdef.name)}", "$converted_var_name::$(sdef.name)"])
-    new_sig = Signature(fname, args, [])
-    body, pass_results = accumulate_passes(sdef.name, Signature(sdef), pass_new_nametype(SDefinition), passes, common_pass_kwargs=(; sdef))
-    args_init = init_args(pass_results, body, take_property=false)
-    push!(body, Statement("$(new_sdef.name)($(join_args(args_init)))", nothing))
-    FDefinition(fname, new_sig, false, body)
+conversion_sig(new_sname, sname, T::ConvertVkStructure) = conversion_sig(new_sname, sname)
+conversion_sig(to, from) = new_sig = Signature("vk_convert", PositionalArgument.(["T::Type{$to}", "var::$from"]), [])
+
+function transform_vars(sdef, T::ConversionDefinition)
+    vars = String[]
+    for args ∈ Signature(sdef).args
+        name, type, sname = args.name, args.type, sdef.name
+        res = transform_inline(name, type, sname, T)
+        !isnothing(res) && push!(vars, res)
+    end
+    vars
 end
 
-function pass!(args::PassArgs, ::Type{TranslateVkTypes}; converted_arg_namespace)
-    @unpack new_type, name, tmp_name = args
-    new_type isa Converted && return Statement("$tmp_name = convert_vk($(new_type.final_type), $converted_arg_namespace.$name)", tmp_name)
+function transform_inline(name, type, sname, ::ConvertVkStructure)
+    drop_field(name, type, sname) && return nothing
+    new_name, new_type = field_transform(name, type, sname)
+    "vk_convert($new_type, $name)"
+end
+
+function pass!(args::PassArgs, ::Type{TranslateVkTypes})
+    @unpack new_type, name, last_name, tmp_name = args
+    new_type isa Converted && return Statement("$name = from_vk($(new_type.final_type), $last_name)", name)
 end
 
 function pass!(args::PassArgs, ::Type{TranslateVkTypesBack})
-    @unpack new_type, last_name, type, tmp_name = args
-    new_type isa Converted && return Statement("$tmp_name = convert_vk_back($type, $last_name)", tmp_name)
+    @unpack new_type, name, last_name, type, tmp_name = args
+    new_type isa Converted && return Statement("$name = to_vk($type, $last_name)", name)
 end
 
-function pass!(args::PassArgs, ::Type{AddDefaults}; opt_params)
-    @unpack tmp_name, name, sdef = args
-    sname = sdef.name
-    if !isempty(opt_params)
-        last_param = last(collect(keys(opt_params)))
-    end
-    if name ∈ keys(opt_params) && isnothing(count_variable(name, sname))
-        param, default = opt_params[name]
-        eol = name == last_param ? "\n" : ""
-        return Statement("$tmp_name = isnothing($(param.name)) ? $default : $(param.name)$eol", tmp_name)
-    end
-    nothing
-end
+# function pass!(args::PassArgs, ::Type{AddDefaults}; opt_params)
+#     @unpack tmp_name, name, new_name, arg, sname = args
+#     if !isempty(opt_params)
+#         last_param = last(collect(keys(opt_params)))
+#     end
+#     if arg ∈ keys(opt_params)
+#         default = opt_params[arg]
+#         eol = name == last_param.name ? "\n" : ""
+#         return Statement("$tmp_name = isnothing($new_name) ? $default : $new_name$eol", tmp_name)
+#     end
+#     nothing
+# end
 
 function pass!(args::PassArgs, ::Type{ComputeLengthArgument})
     @unpack tmp_name, name, array_arg, count_arg, type = args
@@ -264,10 +374,10 @@ function pass!(args::PassArgs, ::Type{ComputeLengthArgument})
     nothing
 end
 
-function pass!(args::PassArgs, ::Type{ReplaceStructureType})
-    @unpack sdef, name = args
-    name == "sType" && return Statement("sType = $(stypes[sdef.name])\n", "sType")
-end
+# function pass!(args::PassArgs, ::Type{ReplaceStructureType})
+#     @unpack sdef, name = args
+#     name == "sType" && return Statement("sType = $(stypes[sdef.name])\n", "sType")
+# end
 
 function pass!(args::PassArgs, ::Type{DefineSelfPointers}; new_sname)
     @unpack name, tmp_name = args
@@ -280,128 +390,134 @@ function pass!(args::PassArgs, ::Type{ConvertArrays})
         eltype = inner_type(new_type)
         if is_base_type(eltype)
             eltype_widen_eval = eval(Meta.parse(widen_type(eltype)))
-            isabstracttype(eltype_widen_eval) && return Statement("$tmp_name = convert(Array{$eltype}, $new_name)", last_name)
+            isabstracttype(eltype_widen_eval) && return Statement("$new_name = convert(Array{$eltype}, $new_name)", last_name)
         end
     end
 end
 
-function preserved_pointer_statements(refname, reffed_obj, preserving_obj, assignee; pointer_fun = "unsafe_pointer", skip_ref = false)
-    preserved_var = skip_ref ? reffed_obj : refname
-    res = skip_ref ? Statement[] : [Statement("$refname = Ref($reffed_obj)", refname)]
-    push!(res, Statement("$assignee = $pointer_fun($preserved_var)", assignee))
-    push!(res, Statement("preserve($preserved_var, $preserving_obj)", nothing))
-    res
+function pass!(args::PassArgs, ::Type{HandlePNextDeps})
+    @unpack name, tmp_name, new_name = args
+    if name == "pNext"
+        return Statement("bag_next = $new_name == C_NULL ? EmptyBag : $new_name.bag", "bag_next")
+    end
+end
+
+function pass!(args::PassArgs, ::Type{GenerateRefs})
+    @unpack tmp_name, new_name, new_type, last_name, type = args
+    if is_ptr(type) && !is_array_type(new_type)
+        return Statement("$tmp_name = $last_name == C_NULL ? C_NULL : Ref($last_name$(inline_getproperty(inner_type(type))))", tmp_name)
+    end
 end
 
 function pass!(args::PassArgs, ::Type{GeneratePointers})
     @unpack type, name, tmp_name, new_name, new_type, last_name, passes = args
     if !is_triggered(DefineSelfPointers, args) && startswith(name, r"p{1,2}[A-Z]")
-        arg_check = is_abstractarray_type(new_type) ? "!isempty($last_name)" : name == "pNext" ? "next ≠ C_NULL" : "!isnothing($new_name)"
-        refname = "$(last_name)_ref"
-        preserving_obj = new_name
-        if_begin = Statement("if $arg_check", nothing)
-        if_end = Statement("end", nothing)
-        if is_abstractarray_type(new_type)
-            if new_type == "AbstractArray{String}"
-                reffed_obj = "$(last_name)_ptrarray"
-                sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name)
-                insert!(sts, 1, Statement("$reffed_obj = pointer.($last_name)", reffed_obj))
-            else
-                reffed_obj = is_vulkan_type(inner_type(type)) ? "getproperty.($last_name, :vk)" : last_name
-                sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name)
-            end
-        elseif new_type == "String"
-            reffed_obj = new_name
-            # sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name, skip_ref=true, pointer_fun="pointer")
-            sts = [Statement("$tmp_name = pointer($new_name)", tmp_name)]
-        else
-            reffed_obj = "$last_name.vk"
-            sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name)
-        end
-        sts = [
-            if_begin,
-            sts...,
-        ]
-        if tmp_name ≠ last_name || is_abstractarray_type(new_type)
-            val_else = (is_abstractarray_type(new_type) || is_ptr(new_type)) && !passes[AddDefaults] ? "C_NULL" : last_name
-            push!(sts, Statement("else $tmp_name = $val_else", tmp_name))
-        end
-        push!(sts, if_end)
-        return sts
-    end
-    nothing
-end
-
-function pass!(args::PassArgs, ::Type{AutomateCreateInfo})
-    @unpack type, name, sdef = args
-    if occursin("CreateInfo", name)
-        Statement("create_info = 1", "create_info", nothing)
+        return Statement("$name = unsafe_pointer($last_name)", name)
     end
 end
 
-function pass!(args::PassArgs, ::Type{TakeConversionArgsFromVkVar}; vk_var_name)
-    @unpack passes, name, tmp_name, last_name = args
-    assigned_name = "$vk_var_name.$name"
-    !any(values(passes)) && return Statement("$tmp_name = $assigned_name", tmp_name)
+# function pass!(args::PassArgs, ::Type{GeneratePointers})
+#     @unpack type, name, tmp_name, new_name, new_type, last_name, passes = args
+#     if !is_triggered(DefineSelfPointers, args) && startswith(name, r"p{1,2}[A-Z]")
+#         arg_check = is_abstractarray_type(new_type) ? "!isempty($last_name)" : "!isnothing($new_name)"
+#         refname = "$(last_name)_ref"
+#         preserving_obj = new_name
+#         if_begin = Statement("if $arg_check", nothing)
+#         if_end = Statement("end", nothing)
+#         if is_abstractarray_type(new_type)
+#             if new_type == "AbstractArray{String}"
+#                 reffed_obj = "$(last_name)_ptrarray"
+#                 sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name)
+#                 insert!(sts, 1, Statement("$reffed_obj = pointer.($last_name)", reffed_obj))
+#             else
+#                 reffed_obj = is_vulkan_type(inner_type(type)) ? "getproperty.($last_name, :vk)" : last_name
+#                 sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name)
+#             end
+#         elseif new_type == "String"
+#             reffed_obj = new_name
+#             # sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name, skip_ref=true, pointer_fun="pointer")
+#             sts = [Statement("$tmp_name = pointer($new_name)", tmp_name)]
+#         else
+#             reffed_obj = "$last_name.vk"
+#             sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name)
+#         end
+#         sts = [
+#             if_begin,
+#             sts...,
+#         ]
+#         if tmp_name ≠ last_name
+#             val_else = (is_abstractarray_type(new_type) || is_ptr(new_type)) && !passes[AddDefaults] ? "C_NULL" : last_name
+#             push!(sts, Statement("else $tmp_name = $val_else", tmp_name))
+#         end
+#         push!(sts, if_end)
+#         return sts
+#     end
+#     nothing
+# end
+
+# function pass!(args::PassArgs, ::Type{AutomateCreateInfo})
+#     @unpack type, name, sdef = args
+#     if occursin("CreateInfo", name)
+#         Statement("create_info = 1", "create_info", nothing)
+#     end
+# end
+
+# a parameter is a keyword argument that relates to the use of a particular function, e.g. flags or allocators.
+# a keyword argument is an argument with a default value.
+# all structs have arguments, some of which are turned into keyword arguments if default values are defined
+
+function drop_argument(name, sname)
+    is_enumeration_command(sname) && name ∈ [enumeration_command_count_variable(sname), enumeration_command_array_variable(sname)] && return true
+    name == "sType" && return true
+    is_count_variable(name, sname) && return true
 end
 
-function parameters(api, sdef::SDefinition)
-    global parameters_dict
-    kwargs = KeywordArgument[]
-    params = Dict()
-    for (name, type) ∈ sdef.fields
-        if occursin("CreateInfo", name) && occursin("CreateInfo", type) && !is_ptr(type)
-            append!(kwargs, parameters(api, constructor(api.structs[type])))
-        else
-            !isnothing(count_variable(name, sdef.name)) && continue
-            if name ∈ keys(parameters_dict)
-                kwarg = parameters_dict[name]
-                push!(kwargs, kwarg)
-            elseif sdef.name ∈ keys(optional_parameters_dict)
-                opt_params = optional_parameters_dict[sdef.name]
-                index = findfirst(x -> first(x) == name, opt_params)
-                if !isnothing(index)
-                    kwarg = KeywordArgument(fieldname_transform(name, type), "nothing") # real default value selection happens in the constructor body, to avoid having C_NULL arguments exposed to the user
-                    params[name] = kwarg => last(opt_params[index])
-                end
-            end
-        end
-    end
-    kwargs = [first.(values(params))..., kwargs...]
-    kwargs, params
+function is_parameter(name, sname)
+    !drop_argument(name, sname) && is_optional_parameter(name, sname)
 end
 
-function is_parameter(argname, api, sdef)
-    kwargs, _ = parameters(api, sdef)
-    argname ∈ getproperty.(kwargs, :name)
+is_keyword_argument(name, type, sname) = is_parameter(name, sname)
+
+function create_info_arguments(sig, args::AbstractArray{T}) where {T <: Argument}
+    nonptr_args = filter(x -> !is_ptr(x.type), sig.args)
+    nonptr_types = types(nonptr_args)
+    create_info_type_indices = findall(occursin.(Ref("Info"), nonptr_types))
+    isempty(create_info_type_indices) && return T[]
+    args_f = (T == PositionalArgument ? arguments : T == KeywordArgument ? keyword_arguments : error("Unknown argument type $T"))
+    new_args = collect(args_f(Signature(api.structs[type])) for type ∈ getindex.(Ref(nonptr_types), create_info_type_indices))
+    map(x -> x.name ∈ getproperty.(args, :name) ? PositionalArgument(x.name * "_create_info", T == PositionalArgument ? x.type : x.default) : x, vcat(new_args)...)
 end
 
-function arguments(api, sdef::SDefinition)
-    args = PositionalArgument[]
-    for (name, type) ∈ sdef.fields
-        discard_field(name, type, sdef) && continue
-        is_parameter(name, api, sdef) && continue
-        new_name, new_type = fieldname_transform(name, type), fieldtype_transform(name, type, sdef.name)
-        if occursin("CreateInfo", name) && occursin("CreateInfo", type) && !is_ptr(type)
-            append!(args, arguments(api, api.structs[type])) # get arguments from the create_info struct
-        else
-            if new_type isa Converted
-                new_type_ = new_type.final_type
-            else
-                if startswith(new_type, "AbstractArray")
-                    eltype = inner_type(new_type)
-                    if eltype ∈ ["String", "AbstractString"]
-                        new_type_ = "AbstractArray"
-                    else
-                        new_type_ = eltype ∈ base_types ? replace(new_type, Regex("(?<={)(?<include>.*?)$eltype") => string("<:" * widen_type(eltype))) : new_type
-                        # println("$new_type => $eltype => $new_type_")
-                    end
-                else
-                    new_type_ = new_type ∈ base_types ? widen_type(new_type) : new_type
-                end
-            end
-            push!(args, PositionalArgument(new_name, new_type_))
-        end
-    end
-    args
+function keyword_arguments(sig; expose_create_info_kwargs = false)
+    kwargs = sig.args |> Filter(x -> is_keyword_argument(x.name, x.type, sig.name)) |> Map(x -> KeywordArgument(fieldname_transform(x.name, x.type), default(x.name, x.type))) |> collect
+    expose_create_info_kwargs ? vcat(kwargs, create_info_arguments(sig, kwargs)) : kwargs
 end
+
+function parameters(sig)
+    param_args = filter(x -> is_parameter(x.name, sig.name), sig.args)
+    OrderedDict(name => value for (name, value) ∈ zip(param_args, map(x -> optional_parameter_default_value(x.name, sig.name), param_args)))
+end
+
+function arguments(sig; expose_create_info_kwargs = false, drop_type=true, transform_type = false, transform_name = true, remove_parameters=true)
+    sname = sig.name
+    args = sig.args |> Filter(x -> !drop_argument(x.name, sname) && (!remove_parameters || !is_parameter(x.name, sname))) |> Map(x -> PositionalArgument(transform_name ? fieldname_transform(x.name, x.type) : x.name, drop_type ? nothing : transform_type ? fieldtype_transform(x.name, x.type, sname) : x.type)) |> collect
+    # for arg ∈ filtered_args
+    #     name, type = sig.args
+    #     new_name, new_type = field_transform(name, type, sname)
+    #     if startswith(new_type, "AbstractArray")
+    #         eltype = inner_type(new_type)
+    #         if eltype ∈ ["String", "AbstractString"]
+    #             new_type_ = "AbstractArray"
+    #         else
+    #             new_type_ = eltype ∈ base_types ? replace(new_type, Regex("(?<={)(?<include>.*?)$eltype") => string("<:" * widen_type(eltype))) : new_type
+    #             # println("$new_type => $eltype => $new_type_")
+    #         end
+    #     else
+    #         new_type_ = new_type ∈ base_types ? widen_type(new_type) : new_type
+    #     end
+    #     push!(args, PositionalArgument(new_name, new_type_))
+    # end
+    expose_create_info_kwargs ? vcat(args, create_info_arguments(sig, args)) : args
+end
+
+remove_type(arg::PositionalArgument) = PositionalArgument(arg.name)

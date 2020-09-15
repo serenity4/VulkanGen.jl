@@ -4,6 +4,9 @@ mutable struct WrappedAPI
     funcs
     consts
     enums
+    misc
+    bags
+    extended_vk_constructors
 end
 
 # not efficient
@@ -14,42 +17,61 @@ Base.show(io::IO, w_api::WrappedAPI) = print(io, "Wrapped API with $(length(w_ap
 abstract type Wrapper end
 
 default_spacing(::SDefinition) = "\n"^2
-default_spacing(decl::FDefinition) = decl.short ? "\n" : "\n"^2
+default_spacing(decl::FDefinition) = decl.short && length(generate(decl)) < 150 ? "\n" : "\n"^2
 default_spacing(::CDefinition) = "\n"
 default_spacing(::EDefinition) = "\n"
 
 unsolved_dependencies(sdef, decls) = collect(values(decls)[findall(keys(decl) .== setdiff(type_dependencies(sdef), keys(decls)))])
 are_dependencies_solved(def, decls) = isempty(unsolved_dependencies(def, decls))
 
-function write_api!(io::IO, def::Declaration; spacing, kwargs...)
-    write(io, generate(def; kwargs...) * spacing(def))
+function write_api!(io::IO, def::Declaration; spacing)
+    write(io, generate(def) * spacing(def))
 end
 
 pre_wrap_code = """
+abstract type VulkanStruct end
 abstract type Handle end
-Base.convert(::Type{Ptr{Nothing}}, h::Handle) = h.handle
+abstract type Bag end
+struct BagEmpty <: Bag end
+const EmptyBag = BagEmpty()
+
+Base.cconvert(T::Type{Ptr{Nothing}}, var::Handle) = var.vks
+Base.cconvert(T::Type{<: Ptr}, var::VulkanStruct) = Ref(var.vks)
+Base.cconvert(T::Type, var::VulkanStruct) = var.vks
+Base.unsafe_convert(T, var::VulkanStruct) = var.vks
 
 """
 
 """Write a wrapped API to files in dest_dir.
 
-Spacing options can be controlled by providing the corresponding argument with a function.
-Files that are written to can be controlled by providing the filename argument with a function.
+Spacing options can be controlled by providing the corresponding argument with a function that takes a Declaration type as argument.
 """
 function Base.write(w_api::WrappedAPI, destfile; spacing=default_spacing)
-    decls = OrderedDict((vcat(w_api.consts, w_api.enums, w_api.structs)...)...)
+    decls = OrderedDict((vcat(w_api.consts, w_api.enums, w_api.structs, w_api.bags)...)...)
     decls_order = resolve_dependencies(decls)
     check_dependencies(decls, decls_order)
     open(destfile, "w+") do io
         write(io, pre_wrap_code)
     end
-    for decl ∈ Iterators.flatten((getindex.(Ref(decls), decls_order), values(w_api.funcs)))
-        kwargs = ()
+    for fdef ∈ values(w_api.extended_vk_constructors)
         open(destfile, "a+") do io
-            write_api!(io, decl; spacing, kwargs...)
+            write_api!(io, fdef; spacing)
         end
     end
-    format(destfile)
+    for decl ∈ getindex.(Ref(decls), decls_order)
+        open(destfile, "a+") do io
+            write_api!(io, decl; spacing)
+        end
+    end
+    open(destfile, "a+") do io
+        write(io, "\n\n" * join(w_api.misc, "\n") * "\n\n")
+    end
+    open(destfile, "a+") do io
+        write(io, "\n\n")
+        write_api!.(Ref(io), collect(values(w_api.funcs)); spacing)
+    end
+
+    # format(destfile)
     nothing
 end
 
@@ -58,26 +80,24 @@ name_transform(decl::Declaration) = name_transform(decl.name, typeof(decl))
 
 # arguments whose value is always predetermined by the function signature
 # they are dropped as argument and replaced wherever necessary
-const spliced_args = Dict(
-    "sType" => stype_splice,
-)
 
 include("wrapping/struct_logic.jl")
+include("wrapping/annotations.jl")
 include("wrapping/constructor_logic.jl")
 include("wrapping/function_logic.jl")
 
-function wrap!(w_api::WrappedAPI, api::API)
+function wrap!(w_api::WrappedAPI)
     sdefs = collect(values(api.structs))
     sdef_handles = filter(x -> is_handle(x.name), sdefs)
     sdef_enumerated_properties = filter(x -> is_enumerated_property(x.name), sdefs)
     other_structs = setdiff(sdefs, union(sdef_handles, sdef_enumerated_properties))
     errors = OrderedDict()
-    wrap!(w_api, api, other_structs, errors)
-    wrap!(w_api, api, sdef_enumerated_properties, errors)
-    wrap!(w_api, api, sdef_handles, errors)
-    wrap!(w_api, api, values(api.funcs), errors)
-    wrap!(w_api, api, values(api.consts), errors)
-    wrap!(w_api, api, values(api.enums), errors)
+    wrap!(w_api, sdefs, errors)
+    # wrap!(w_api, sdef_enumerated_properties, errors)
+    # wrap!(w_api, sdef_handles, errors)
+    # wrap!(w_api, values(api.funcs), errors)
+    wrap!(w_api, values(api.consts), errors)
+    wrap!(w_api, values(api.enums), errors)
     length(errors) == 0 ? @info("API successfully wrapped.") : @warn("API wrapped with $(length(errors)) errors:")
     for (field, msg) ∈ errors
         println("\t\e[31;1;1m$field: $msg\e[m")
@@ -85,10 +105,10 @@ function wrap!(w_api::WrappedAPI, api::API)
     w_api
 end
 
-function wrap!(w_api, api, objects, errors)
+function wrap!(w_api, objects, errors)
     for obj ∈ objects
         try
-            wrap!(w_api, api, obj)
+            wrap!(w_api, obj)
         catch e
             msg = hasproperty(e, :msg) ? e.msg : "$(typeof(e))"
             errors[obj.name] = msg
@@ -99,19 +119,21 @@ function wrap!(w_api, api, objects, errors)
     end
 end
 
-function wrap!(w_api, api, edef::EDefinition)
+function wrap!(w_api, edef::EDefinition)
+    
     new_edef = EDefinition(remove_vk_prefix(edef.name), remove_vk_prefix.(edef.fields), edef.with_begin_block, isnothing(edef.type) ? nothing : remove_vk_prefix(edef.type), edef.enum_macro)
     w_api.enums[new_edef.name] = new_edef
     w_api.funcs["convert_$(edef.name)"] = FDefinition("Base.convert(T::Type{$(new_edef.name)}, e::$(edef.name)) = T(UInt(e))")
     w_api.funcs["convert_$(new_edef.name)"] = FDefinition("Base.convert(T::Type{$(edef.name)}, e::$(new_edef.name)) = T(UInt(e))")
 end
 
-function wrap!(w_api, api, cdef::CDefinition)
+function wrap!(w_api, cdef::CDefinition)
     new_cdef = CDefinition(remove_vk_prefix(cdef.name), is_literal(cdef.value) ? cdef.value : remove_vk_prefix(cdef.value))
     w_api.consts[new_cdef.name] = new_cdef
 end
 
-function wrap(api::API)
-    w_api = WrappedAPI(api.source, OrderedDict{String, SDefinition}(), OrderedDict{String, FDefinition}(), OrderedDict{String, CDefinition}(), OrderedDict{String, EDefinition}())
-    wrap!(w_api, api)
+function wrap(library_api::API)
+    global api = library_api
+    w_api = WrappedAPI(api.source, OrderedDict{String, SDefinition}(), OrderedDict{String, FDefinition}(), OrderedDict{String, CDefinition}(), OrderedDict{String, EDefinition}(), String[], OrderedDict{String, SDefinition}(), OrderedDict{String, FDefinition}())
+    wrap!(w_api)
 end

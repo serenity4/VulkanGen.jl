@@ -1,10 +1,8 @@
 function member_attr(node, attr)
     attr == "name" && haskey(node, "alias") && return node["name"] # special handling for aliases
-    attrnode = node.firstelement
-    while attrnode.name != attr
-        attrnode = attrnode.nextelement
-    end
-    attrnode.content
+    val = findfirst(".//$attr", node)
+    isnothing(val) && error("Attribute $attr not found in node\n$node")
+    val.content
 end
 
 function resolve_aliases!(collection::Dict, nodes)
@@ -29,3 +27,12 @@ function extract_type(param)
 end
 
 extract_identifier(param) = split(replace(param.content, "const " => ""))[2]
+function command_name(node)
+    isnothing(findfirst("proto", node)) && return command_name(node.parentelement)
+    findfirst("proto/name", node).content
+end
+
+function struct_name(node)
+    (!haskey(node, "category") || node["category"] ≠ "struct") && return struct_name(node.parentelement)
+    node["name"]
+end

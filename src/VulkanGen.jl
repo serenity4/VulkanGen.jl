@@ -5,6 +5,7 @@ using VulkanCore.vk
 using VulkanCore:vk
 using VulkanCore
 
+
 include("spec.jl")
 
 include("utils.jl")
@@ -14,8 +15,12 @@ include("types.jl")
 include("codegen.jl")
 include("vulkan.jl")
 include("parse.jl")
+
+api = API("", OrderedDict.([(), (), (), ()])..., nothing) # this variable is replaced by the api provided in the function wrap
+
 include("dependency_resolution.jl")
 include("wrap_api.jl")
+
 
 export vk,
 CamelCaseLower,
