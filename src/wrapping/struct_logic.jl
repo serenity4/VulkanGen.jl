@@ -5,17 +5,11 @@ function tmp_argname(name, type)
     "_" * name
 end
 
-function add_conversions!(w_api, new_sdef, sdef)
-    conv = !is_enumerated_property(sdef.name) ? "@add_vk_convert($(new_sdef.name), $(sdef.name))" : nothing
-    !isnothing(conv) ? push!(w_api.misc, conv) : nothing
-end
-
 function wrap!(w_api, sdef::SDefinition)
     new_sdef = structure(sdef)
     has_bag(sdef.name) && setindex!(w_api.bags, create_bag(sdef), bagtype(sdef.name))
     wrap_structure!(w_api, new_sdef)
     wrap_constructor!(w_api, new_sdef, sdef)
-    # add_conversions!(w_api, new_sdef, sdef)
 end
 
 function wrap_structure!(w_api, new_sdef)
@@ -53,6 +47,7 @@ end
 # )
 
 drop_field(name, type, sname) = name == "sType" || is_count_variable(name, sname)
+keeps_original_layout(sdef) = !has_bag(sdef.name) && "sType" ∉ keys(sdef.fields)
 
 instance_name(sdef) = convert(SnakeCaseLower, sdef.name)
 
@@ -64,8 +59,9 @@ function create_bag(sdef)
         tmp_name = tmp_argname(name, type)
         if is_ptr(type)
             eltype = inner_type(type)
-            has_bag(eltype) && setindex!(fields, bagtype(eltype), "bag_" * new_name)
+            has_bag(eltype) && setindex!(fields, "", "bag_" * new_name)
             name == "pNext" && setindex!(fields, "", "bag_next")
+            eltype == "Cstring" && setindex!(fields, "", new_name * "_ptrarray")
         end
         if is_ptr(type) || type == "Cstring"
             field_name = (type ≠ "Cstring" && is_vulkan_struct(inner_type(type))) || name == "pNext" ? new_name * "_ref" : new_name
@@ -104,10 +100,10 @@ convention_exceptions = Dict(
 function fieldname_transform(name, type)
     name ∈ keys(convention_exceptions) && return convention_exceptions[name]
     startswith(name, "pfn") && return convert(SnakeCaseLower, CamelCaseUpper(name[4:end])).value
-    if !isnothing(match(r"^p+[A-Z]", name))
+    if !isnothing(match(r"^\s*p+[A-Z]", name))
         cc = CamelCaseUpper(lstrip(name, 'p'))
     else
-        cc = detect_convention(name)(name)
+        cc = detect_convention(name, instance=true)
     end
     convert(VulkanGen.julia_convention[:variable], cc).value
 end

@@ -118,6 +118,8 @@ is_ntuple(type) = startswith(type, "NTuple{")
 
 is_vulkan_type(name) = any(startswith.(Ref(name), ["vk", "Vk", "VK_"]))
 is_vulkan_struct(name) = name ∈ keys(api.structs)
+is_extension_type(name) = name ∉ base_types && !is_vulkan_type(name)
+is_extension_ptr(name) = is_ptr(name) && is_extension_type(inner_type(name))
 is_base_type(name) = name ∈ base_types || is_literal(name)
 is_literal(el) = occursin(r"[\.\"]+", el) || occursin(r"^\d+$", el)
 is_expr(el) = occursin(r"[\(\)~\[\]]", el)

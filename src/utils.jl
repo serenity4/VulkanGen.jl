@@ -3,7 +3,7 @@ macro sym_str(def)
 end
 
 join_args(args) = join(args, ", ")
-splitargs(args) = filter(!isempty, split(args, ","))
+splitargs(args) = filter(!isempty, strip.(split(args, ",")))
 subindex(arr::AbstractArray, indices) = [arr[i] for i ∈ indices]
 
 function splitjoin(str, removed_parts; delim=" ")

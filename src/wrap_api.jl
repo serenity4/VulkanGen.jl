@@ -28,6 +28,8 @@ function write_api!(io::IO, def::Declaration; spacing)
     write(io, generate(def) * spacing(def))
 end
 
+exports(symbols) = "export $(join_args(symbols))"
+
 pre_wrap_code = """
 abstract type VulkanStruct end
 abstract type Handle end
@@ -35,10 +37,11 @@ abstract type Bag end
 struct BagEmpty <: Bag end
 const EmptyBag = BagEmpty()
 
-Base.cconvert(T::Type{Ptr{Nothing}}, var::Handle) = var.vks
+Base.cconvert(T::Type, var::VulkanStruct) = var
+# Base.cconvert(T::Type{<: Ptr{<: Ptr}}, var::VulkanStruct) = [var.vks]
 Base.cconvert(T::Type{<: Ptr}, var::VulkanStruct) = Ref(var.vks)
-Base.cconvert(T::Type, var::VulkanStruct) = var.vks
-Base.unsafe_convert(T, var::VulkanStruct) = var.vks
+Base.unsafe_convert(T::Type, var::VulkanStruct) = var.vks
+Base.unsafe_convert(T::Type{Ptr{Nothing}}, var::Handle) = var.handle
 
 """
 
@@ -69,9 +72,10 @@ function Base.write(w_api::WrappedAPI, destfile; spacing=default_spacing)
     open(destfile, "a+") do io
         write(io, "\n\n")
         write_api!.(Ref(io), collect(values(w_api.funcs)); spacing)
+        write(io, "\n\n" * exports(vcat((map(x -> x.name, filter(x -> x.name ∉ ["Base.convert", "Base"], vcat(map(collect ∘ values, [decls, w_api.funcs])...)))), collect(Iterators.flatten(map.(Ref(x -> strip.(first.(split.(x, "=")))), getproperty.(values(w_api.enums), :fields)))))))
     end
 
-    # format(destfile)
+    format(destfile)
     nothing
 end
 
@@ -95,7 +99,7 @@ function wrap!(w_api::WrappedAPI)
     wrap!(w_api, sdefs, errors)
     # wrap!(w_api, sdef_enumerated_properties, errors)
     # wrap!(w_api, sdef_handles, errors)
-    # wrap!(w_api, values(api.funcs), errors)
+    wrap!(w_api, values(api.funcs), errors)
     wrap!(w_api, values(api.consts), errors)
     wrap!(w_api, values(api.enums), errors)
     length(errors) == 0 ? @info("API successfully wrapped.") : @warn("API wrapped with $(length(errors)) errors:")
