@@ -21,9 +21,10 @@ macro return_if_nothing(expr)
     end
 end
 
-function extract_type(param)
+function extract_type(param; include_pointer=true)
     type = split(replace(param.content, "const " => ""))[1]
-    endswith(type, "*") ? "Ptr{$(type[1:end-1])}" : type
+    type_nostar = rstrip(type, ['*', ' '])
+    endswith(type, "*") && include_pointer ? "Ptr{$(type_nostar)}" : type_nostar
 end
 
 extract_identifier(param) = split(replace(param.content, "const " => ""))[2]

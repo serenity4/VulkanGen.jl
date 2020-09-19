@@ -69,9 +69,8 @@ function array_variable(name, sname)
 end
 
 function default(name, type)
-    is_handle(type) && return "C_NULL"
+    is_handle(type) || startswith(name, "p") && return "C_NULL"
     (is_bitmask(type) || type ∈ ["uint16_t", "uint64_t", "int16_t", "uint32_t", "int32_t", "float", "size_t", "VkBool32", "VkSampleMask", "VkFlags", "VkDeviceSize", "VkDeviceAddress", "DWORD"]) && return "0"
-    startswith(name, "p") && return "C_NULL"
     # @warn "Unknown default value for type $type ($name), setting 0 as default"
     "0"
 end

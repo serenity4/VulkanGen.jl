@@ -35,6 +35,24 @@ struct Converted
     final_type
 end
 
+extension_types = [
+    "ANativeWindow",
+    "AHardwareBuffer",
+    "CAMetalLayer",
+    "wl_surface",
+    "wl_display",
+    "Display",
+    "VisualID",
+    "xcb_connection_t",
+    "xcb_window_t",
+    "xcb_visualid_t",
+    "MirConnection",
+    "MirSurface",
+    "HINSTANCE",
+    "HWND",
+    "RROutput",
+]
+
 type_conversions = Dict(
     "Cstring" => "Cstring",
     "Float32" => "Float32",
@@ -125,6 +143,7 @@ is_literal(el) = occursin(r"[\.\"]+", el) || occursin(r"^\d+$", el)
 is_expr(el) = occursin(r"[\(\)~\[\]]", el)
 is_abstractarray_type(el) = startswith(el, "AbstractArray")
 is_array_type(el) = startswith(el, "Array")
+is_array_of_vk_objects(name, type, sname) = !isnothing(type) && is_ptr(type) && is_vulkan_struct(inner_type(type)) && is_array_variable(name, sname)
 
 
 "Returns all the leaf types that a type depends on, including itself if the type contains no inner type."

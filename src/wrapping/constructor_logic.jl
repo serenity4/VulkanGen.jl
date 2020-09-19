@@ -5,14 +5,20 @@ function constructor(new_sdef, sdef)
         for (fun, type, id) ∈ zip(handle_creation_info[sname]...)
             cons = constructor(new_sdef, sdef, CreateVkHandle(), fun, type, id; add_create_info_type_annotation=true, is_inner_constructor=false)
             !isnothing(cons) && push!(defs, cons)
+            cons = constructor(new_sdef, sdef, CreateVkHandle(), fun, type, id; add_create_info_type_annotation=true, is_inner_constructor=false, add_fun_ptr=true)
+            !isnothing(cons) && push!(defs, cons)
         end
     elseif is_handle_with_create_info(sname)
         # new_sdef.inner_constructor = constructor(new_sdef, sdef, CreateVkHandle())
         push!(defs, constructor(new_sdef, sdef, CreateVkHandle()))
+        push!(defs, constructor(new_sdef, sdef, CreateVkHandle(), add_fun_ptr=true))
         # push!(defs, constructor(new_sdef, sdef, CreateVkHandleWithCreateInfo()))
     elseif !is_handle(sname)
         if keeps_original_layout(sdef)
             push!(defs, constructor(new_sdef, sdef, GenericConstructor(), is_inner_constructor=false, add_type_annotations=false))
+            if length(arguments(Signature(new_sdef))) == 1
+                new_sdef.inner_constructor = FDefinition(new_sdef.name, Signature(new_sdef.name, [PositionalArgument("vks", sname)], KeywordArgument[]), true, [Statement("new(vks)")])
+            end
         else
             new_sdef.inner_constructor = constructor(new_sdef, sdef, GenericConstructor(), is_inner_constructor=true)
         end
@@ -293,6 +299,15 @@ end
 is_enabled(pass::Type{T}, args::PassArgs) where {T <: Pass} = any(isa.(Ref(T), keys(args.passes)))
 is_triggered(pass::Type{T}, args::PassArgs) where {T <: Pass} = is_enabled(pass, args) && args.passes[pass]
 
+function check_is_default(name, type, action)
+    if is_ptr(type)
+        predicate = "$name == C_NULL"
+    else
+        predicate = "$name == 0"
+    end
+    predicate * " ? $name : $action"
+end
+
 pass_new_nametype(::Type{SDefinition}) = (name, type, sname) -> (fieldname_transform(name, type), fieldtype_transform(name, type, sname))
 
 function type_annotate_argument(arg)
@@ -329,32 +344,45 @@ function constructor(new_sdef, sdef, definition::ConstructorNoVKS; add_type_anno
     FDefinition(new_sdef.name, new_sig, false, body, "Constructor identical to the corresponding $(sdef.name).")
 end
 
-function constructor(new_sdef, sdef, def::CreateVkHandle)
+function constructor(new_sdef, sdef, def::CreateVkHandle; add_fun_ptr=false)
     create_fun, create_info_struct, create_info_id = handle_creation_info[sdef.name]
-    constructor(new_sdef, sdef, def, create_fun, create_info_struct, create_info_id; add_create_info_type_annotation=true, is_inner_constructor=false)
+    constructor(new_sdef, sdef, def, create_fun, create_info_struct, create_info_id; add_create_info_type_annotation=true, is_inner_constructor=false, add_fun_ptr)
 end
 
 
-function constructor(new_sdef, sdef, ::CreateVkHandle, create_fun, create_info_struct, create_info_id; is_inner_constructor=true, add_create_info_type_annotation=false)
+function constructor(new_sdef, sdef, ::CreateVkHandle, create_fun, create_info_struct, create_info_id; is_inner_constructor=true, add_create_info_type_annotation=false, add_fun_ptr=false)
     create_fun ∉ keys(api.funcs) && (@warn("$create_fun not found. Skipping.") ; return)
     create_fun_fdef = api.funcs[create_fun]
     create_fun_sig = create_fun_fdef.signature
     args = arguments(create_fun_sig)
+    has_multiple_create_info = create_info_id == "pCreateInfos" ? true : create_info_id == "pCreateInfo" ? false : error("Unknown create info ID $create_info_id")
+    new_create_info_id = has_multiple_create_info ? "create_infos" : "create_info"
     if add_create_info_type_annotation
-        args = map(x -> x.name == "create_info" ? PositionalArgument(x.name, name_transform(create_info_struct, SDefinition)) : x, args)
+        args = map(x -> x.name == new_create_info_id ? (has_multiple_create_info ? PositionalArgument(x.name, "AbstractArray{$(name_transform(create_info_struct, SDefinition)), 1}") : PositionalArgument(x.name, name_transform(create_info_struct, SDefinition))) : x, args)
     end
     kwargs = keyword_arguments(create_fun_sig)
     identifier = last(args).name
+    add_fun_ptr ? push!(args, PositionalArgument("fun_ptr_create")) : nothing
+    add_fun_ptr ? push!(args, PositionalArgument("fun_ptr_destroy")) : nothing
     new_sig = Signature(new_sdef.name, filter(x -> x.name ≠ identifier, args), kwargs)
-    body = [
+    body = has_multiple_create_info ? [
+        Statement("create_info_count = length($new_create_info_id)"),
+        Statement("$identifier = Array{$(sdef.name), 1}(undef, create_info_count)", identifier),
+    ] : [
         Statement("$identifier = Ref{$(sdef.name)}()", identifier),
-        Statement("@check $(create_fun_sig.name)($(join_args(map(fieldname_transform, argnames(create_fun_sig), argtypes(create_fun_sig)))))", nothing),
-        Statement("vks = $(is_inner_constructor ? "new" : new_sdef.name)($identifier[])", "vks"),
         ]
+    broadcast_if_multiple_create_info = has_multiple_create_info ? "." : ""
+    deref = has_multiple_create_info ? identifier : "$identifier[]"
+    body = [
+        body...,
+        Statement("@check $(create_fun_sig.name)($(join_args(map(fieldname_transform, argnames(create_fun_sig), argtypes(create_fun_sig))))$(add_fun_ptr ? ", fun_ptr_create" : ""))", nothing),
+        Statement("vks = $(is_inner_constructor ? "new" : new_sdef.name)$broadcast_if_multiple_create_info($deref)", "vks"),
+    ]
     if is_handle_destructible(sdef.name)
         destroy_fun, destroyed_el, identifiers, types = handle_destruction_info[sdef.name]
         destroy_fun_fdef = api.funcs[destroy_fun]
-        push!(body, Statement("finalizer(x -> $destroy_fun($(join_args(map(x -> x == fieldname_transform(destroyed_el, sdef.name) ? "x" : x, map(fieldname_transform, identifiers, types))))), vks)", nothing))
+        lambda_fun = "x -> $destroy_fun($(join_args(map(x -> x == fieldname_transform(destroyed_el, sdef.name) ? "x" : x, map(fieldname_transform, identifiers, types))))$(add_fun_ptr ? ", fun_ptr_destroy" : ""))"
+        push!(body, Statement("finalizer$broadcast_if_multiple_create_info($(has_multiple_create_info ? "Ref($lambda_fun)" : lambda_fun), vks)", nothing))
     end
     FDefinition(new_sig.name, new_sig, false, body, "")
 end
@@ -490,11 +518,13 @@ function pass!(args::PassArgs, ::Type{DefineSelfPointers}; new_sname)
 end
 
 function pass!(args::PassArgs, ::Type{ConvertArrays})
-    @unpack new_type, type, last_name, new_name, tmp_name = args
+    @unpack new_type, name, sname, type, last_name, new_name, tmp_name = args
     if !(new_type isa Converted) && is_array_type(new_type)
         if is_ptr(type) && inner_type(type) == "Cstring"
             ptrarr = new_name * "_ptrarray"
             return Statement("$ptrarr = pointer.($new_name)", ptrarr)
+        elseif is_array_of_vk_objects(name, type, sname)
+            return Statement("$tmp_name = $(check_is_default(new_name, type, "getproperty.($new_name, $(is_handle(inner_type(type)) ? ":handle" : ":vks"))"))", tmp_name)
         else
             eltype = inner_type(new_type)
             if is_base_type(eltype)
@@ -513,9 +543,9 @@ function pass!(args::PassArgs, ::Type{HandlePNextDeps})
 end
 
 function pass!(args::PassArgs, ::Type{GenerateRefs})
-    @unpack tmp_name, new_name, new_type, last_name, type = args
+    @unpack tmp_name, new_name, new_type, last_name, type, sname = args
     if is_ptr(type) && !is_array_type(new_type) && !is_extension_ptr(type)
-        return Statement("$tmp_name = $last_name == C_NULL ? C_NULL : Ref($last_name$(inline_getproperty(inner_type(type))))", tmp_name)
+        return Statement("$tmp_name = $(check_is_default(last_name, type, "Ref($last_name$(inline_getproperty(inner_type(type))))"))", tmp_name)
     end
 end
 

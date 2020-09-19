@@ -38,7 +38,8 @@ struct BagEmpty <: Bag end
 const EmptyBag = BagEmpty()
 
 Base.cconvert(T::Type, var::VulkanStruct) = var
-# Base.cconvert(T::Type{<: Ptr{<: Ptr}}, var::VulkanStruct) = [var.vks]
+Base.cconvert(T::Type{<: Ptr}, var::AbstractArray{<: VulkanStruct}) = getproperty.(var, :vks)
+Base.cconvert(T::Type{<: Ptr}, var::AbstractArray{<: Handle}) = getproperty.(var, :handle)
 Base.cconvert(T::Type{<: Ptr}, var::VulkanStruct) = Ref(var.vks)
 Base.unsafe_convert(T::Type, var::VulkanStruct) = var.vks
 Base.unsafe_convert(T::Type{Ptr{Nothing}}, var::Handle) = var.handle
@@ -72,7 +73,7 @@ function Base.write(w_api::WrappedAPI, destfile; spacing=default_spacing)
     open(destfile, "a+") do io
         write(io, "\n\n")
         write_api!.(Ref(io), collect(values(w_api.funcs)); spacing)
-        write(io, "\n\n" * exports(vcat((map(x -> x.name, filter(x -> x.name ∉ ["Base.convert", "Base"], vcat(map(collect ∘ values, [decls, w_api.funcs])...)))), collect(Iterators.flatten(map.(Ref(x -> strip.(first.(split.(x, "=")))), getproperty.(values(w_api.enums), :fields)))))))
+        write(io, "\n\n" * exports(unique(vcat((map(x -> x.name, filter(x -> x.name ∉ ["Base.convert", "Base", extension_types...], vcat(map(collect ∘ values, [decls, w_api.funcs])...)))), collect(Iterators.flatten(map.(Ref(x -> strip.(first.(split.(x, "=")))), getproperty.(values(w_api.enums), :fields))))))))
     end
 
     format(destfile)

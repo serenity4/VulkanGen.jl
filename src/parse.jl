@@ -56,7 +56,10 @@ function parse_for_definition(file, ::Type{T}) where {T <: Declaration}
     open(file) do io
         while !eof(io)
             lines = detect_definition(io, T)
-            isnothing(lines) ? nothing : push!(defs, T(join(lines, "\n")))
+            if !isnothing(lines)
+                decl = T(join(lines, "\n"))
+                !(decl isa FDefinition && last(decl.signature.args).name == "fun_ptr") ? push!(defs, decl) : nothing
+            end
         end
     end
     defs
