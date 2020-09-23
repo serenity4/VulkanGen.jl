@@ -32,17 +32,20 @@ exports(symbols) = "export $(join_args(symbols))"
 
 pre_wrap_code = """
 abstract type VulkanStruct end
-abstract type Handle end
+abstract type Handle <: VulkanStruct end
 abstract type Bag end
 struct BagEmpty <: Bag end
 const EmptyBag = BagEmpty()
 
-Base.cconvert(T::Type, var::VulkanStruct) = var
-Base.cconvert(T::Type{<: Ptr}, var::AbstractArray{<: VulkanStruct}) = getproperty.(var, :vks)
-Base.cconvert(T::Type{<: Ptr}, var::AbstractArray{<: Handle}) = getproperty.(var, :handle)
-Base.cconvert(T::Type{<: Ptr}, var::VulkanStruct) = Ref(var.vks)
-Base.unsafe_convert(T::Type, var::VulkanStruct) = var.vks
-Base.unsafe_convert(T::Type{Ptr{Nothing}}, var::Handle) = var.handle
+Base.cconvert(T::Type, x::VulkanStruct) = x
+Base.cconvert(T::Type{<: Ptr}, x::AbstractArray{<: VulkanStruct}) = getproperty.(x, :vks)
+Base.cconvert(T::Type{<: Ptr}, x::AbstractArray{<: Handle}) = getproperty.(x, :handle)
+Base.cconvert(T::Type{<: Ptr}, x::VulkanStruct) = Ref(x.vks)
+Base.cconvert(T::Type{<: Ptr}, x::Handle) = x
+Base.unsafe_convert(T::Type, x::VulkanStruct) = x.vks
+Base.unsafe_convert(T::Type{Ptr{Nothing}}, x::Handle) = x.handle
+
+Base.broadcastable(x::VulkanStruct) = Ref(x)
 
 """
 

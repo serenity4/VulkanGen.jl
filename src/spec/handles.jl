@@ -39,7 +39,7 @@ handles = fetch_handles(xroot)
 is_handle(type) = type ∈ (keys(handles)..., "HANDLE")
 
 function fetch_handle_creation_info(xroot)
-    nodes = findall("//command/proto[contains(./child::name, 'vkCreate')]/following-sibling::param[contains(., 'const ')]/child::type[contains(., 'CreateInfo')]", xroot)
+    nodes = findall("//command/proto[contains(./child::name, 'vkCreate') or contains(./child::name, 'vkAllocate')]/following-sibling::param[contains(., 'const ')]/child::type[contains(., 'CreateInfo') or contains(., 'AllocateInfo')]", xroot)
     res = OrderedDict()
     for node ∈ nodes
         type = node.parentelement.parentelement.lastelement.firstelement.content
@@ -63,12 +63,12 @@ handle_creation_info = fetch_handle_creation_info(xroot)
 is_handle_with_create_info(name) = name ∈ keys(handle_creation_info)
 
 function fetch_handle_destruction_info(xroot)
-    nodes = findall("//command/proto[contains(./child::name, 'vkDestroy')]", xroot)
+    nodes = findall("//command/proto[contains(./child::name, 'vkDestroy') or contains(./child::name, 'vkFree')]", xroot)
     res = OrderedDict()
     for node ∈ nodes
-        destroyed_el = findfirst(".//param[@externsync='true']", node.parentelement)
+        destroyed_el = findlast(".//param[@externsync='true']", node.parentelement)
         destroy_fun = findfirst(".//child::name", node).content
-        destroyed_type = extract_type(destroyed_el)
+        destroyed_type = extract_type(destroyed_el, include_pointer=false)
         all_params = findall(".//param[..//../command]", node.parentelement)
         identifiers = extract_identifier.(all_params)
         types = extract_type.(all_params)
@@ -85,43 +85,6 @@ is_handle_destructible(type) = type ∈ keys(handle_destruction_info)
 
 handles_with_multiple_create_info = filter(x -> first(x.second) isa AbstractArray, handle_creation_info)
 is_handle_with_multiple_create_info(type) = type ∈ keys(handles_with_multiple_create_info)
-
-function fetch_handle_allocate_info(xroot)
-    nodes = findall("//command/proto[contains(./child::name, 'vkAllocate')]/following-sibling::param[contains(., 'const ')]/child::type[contains(., 'AllocateInfo')]", xroot)
-    res = OrderedDict()
-    for node ∈ nodes
-        type = node.parentelement.parentelement.lastelement.firstelement.content
-        create_fun = node.parentelement.parentelement.firstelement.firstelement.nextelement.content
-        create_info_struct = node.content
-        identifier = node.nextelement.content
-        if haskey(res, type) # several create info were available for a given handle
-            cf, cis, i = res[type]
-            if !(cf isa AbstractArray) # first time that an array needs to be created
-                cf, cis, i = [cf], [cis], [i]
-            end
-            res[type] = [[cf..., create_fun], [cis..., create_info_struct], [i..., identifier]]
-        else
-            res[type] = (create_fun, create_info_struct, identifier)
-        end
-    end
-    res
-end
-
-function fetch_handle_free_info(xroot)
-    nodes = findall("//command/proto[contains(./child::name, 'vkFree')]", xroot)
-    res = OrderedDict()
-    for node ∈ nodes
-        destroyed_el = findlast(".//param[@externsync='true']", node.parentelement)
-        destroy_fun = findfirst(".//child::name", node).content
-        destroyed_type = extract_type(destroyed_el, include_pointer=false)
-        all_params = findall(".//param[..//../command]", node.parentelement)
-        identifiers = extract_identifier.(all_params)
-        types = extract_type.(all_params)
-        res[destroyed_type] = (destroy_fun, extract_identifier(destroyed_el), identifiers, types)
-    end
-    res
-end
-
 
 function fetch_structextends(xroot)
     nodes = findall("//type[@category='struct' and @structextends]", xroot)
