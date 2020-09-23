@@ -99,12 +99,6 @@ function fetch_returnedonly(xroot)
     getindex.(findall("//type[@returnedonly='true']", xroot), "name")
 end
 
-handle_allocation_info = fetch_handle_allocate_info(xroot)
-
 struct_extensions = fetch_structextends(xroot)
 
 returnedonly_structs = fetch_returnedonly(xroot)
-
-handle_freeing_info = fetch_handle_free_info(xroot)
-
-
