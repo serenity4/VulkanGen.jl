@@ -15,6 +15,9 @@ end
 enumeration_command_counts = fetch_enumeration_command_counts(xroot)
 
 is_enumeration_command(fname) = haskey(enumeration_command_counts, fname)
+is_allocation_command(fname) = startswith(fname, "vkAllocate")
+is_free_command(fname) = startswith(fname, "vkFree")
+
 enumeration_command_count_variable(fname) = enumeration_command_counts[fname].first
 enumeration_command_array_variable(fname; include_type = false) = (nametype = enumeration_command_counts[fname].second; include_type ? nametype : nametype[1])
 

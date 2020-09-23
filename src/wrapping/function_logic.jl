@@ -89,22 +89,24 @@ function skip_wrap(fdef; warn=true)
     FDefinition(name, Signature(name, fdef.signature.args, fdef.signature.kwargs), fdef.short, fdef.body)
 end
 
+checked_function_call(fdef) = (fdef.return_type == "VkResult" ? "@check " : "") * fdef.name
+
 function wrap_generic(fdef)
     sig = fdef.signature
-    args, kwargs = arguments(sig, transform_name=false), keyword_arguments(sig, transform_name=false)
+    args, kwargs = arguments(sig, transform_name=true), keyword_arguments(sig, transform_name=false)
     new_fname = name_transform(fdef.name, FDefinition)
     new_sig = Signature(new_fname, args, kwargs)
-    body = [Statement("$(sig.name)($(join_args(argnames(new_sig))))")]
+    # body = [Statement("$(sig.name)($(join_args(argnames(new_sig))))")]
     # kept_args = arguments(sig, transform_name=false, drop_type=false)
     # fname = name_transform(fdef.name, FDefinition)
-    # body, pass_results = accumulate_passes(fdef.name, args, pass_new_nametype(FDefinition), [ComputeLengthArgument()])
+    body, pass_results = accumulate_passes(fdef.name, fdef.signature.args, pass_new_nametype(FDefinition), [ComputeLengthArgument()])
     # new_sig = Signature(fname, remove_type.(args), kwargs)
-    # last_args_used = getproperty.(getproperty.(last.(values(pass_results)), :pass_args), :last_name)
+    last_args_used = getproperty.(getproperty.(last.(values(pass_results)), :pass_args), :last_name)
     # for (i, arg) ∈ enumerate(sig.args)
     #     tmp_argname(arg.name, arg.type) ∉ last_args_used && arg.name ∉ last_args_used && insert!(last_args_used, i, arg.name)
     # end
-    # _m = fdef.return_type == "VkResult" ? "@check " : ""
-    # push!(body, Statement("$(_m)$(fdef.name)($(join_args(last_args_used .* inline_getproperty.(types(kept_args)))))"))
+    _m = fdef.return_type == "VkResult" ? "@check " : ""
+    push!(body, Statement("$(checked_function_call(fdef))($(join_args(last_args_used)))"))
     FDefinition(new_fname, new_sig, false, body, "Generic definition")
 end
 

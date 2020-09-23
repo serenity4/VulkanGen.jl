@@ -355,7 +355,7 @@ function constructor(new_sdef, sdef, ::CreateVkHandle, create_fun, create_info_s
     create_fun_fdef = api.funcs[create_fun]
     create_fun_sig = create_fun_fdef.signature
     args = arguments(create_fun_sig)
-    has_multiple_create_info = create_info_id == "pCreateInfos" ? true : create_info_id == "pCreateInfo" ? false : error("Unknown create info ID $create_info_id")
+    has_multiple_create_info = create_info_id ∈ ["pCreateInfos", "pAllocateInfos"] ? true : create_info_id ∈ ["pCreateInfo", "pAllocateInfo"] ? false : error("Unknown create info ID $create_info_id")
     new_create_info_id = has_multiple_create_info ? "create_infos" : "create_info"
     if add_create_info_type_annotation
         args = map(x -> x.name == new_create_info_id ? (has_multiple_create_info ? PositionalArgument(x.name, "AbstractArray{$(name_transform(create_info_struct, SDefinition)), 1}") : PositionalArgument(x.name, name_transform(create_info_struct, SDefinition))) : x, args)
@@ -363,27 +363,32 @@ function constructor(new_sdef, sdef, ::CreateVkHandle, create_fun, create_info_s
     kwargs = keyword_arguments(create_fun_sig)
     identifier = last(args).name
     add_fun_ptr ? push!(args, PositionalArgument("fun_ptr_create")) : nothing
-    add_fun_ptr ? push!(args, PositionalArgument("fun_ptr_destroy")) : nothing
     new_sig = Signature(new_sdef.name, filter(x -> x.name ≠ identifier, args), kwargs)
+    creates_multiple_handles = is_allocation_command(create_fun)
     body = has_multiple_create_info ? [
         Statement("create_info_count = length($new_create_info_id)"),
         Statement("$identifier = Array{$(sdef.name), 1}(undef, create_info_count)", identifier),
+    ] : creates_multiple_handles ? [
+        Statement("$identifier = Array{$(sdef.name), 1}(undef, n)", identifier),
     ] : [
         Statement("$identifier = Ref{$(sdef.name)}()", identifier),
-        ]
-    broadcast_if_multiple_create_info = has_multiple_create_info ? "." : ""
-    deref = has_multiple_create_info ? identifier : "$identifier[]"
+    ]
+
+    broadcast_if_multiple_create_info = has_multiple_create_info || creates_multiple_handles ? "." : ""
+    deref = has_multiple_create_info || creates_multiple_handles ? identifier : "$identifier[]"
     body = [
         body...,
         Statement("@check $(create_fun_sig.name)($(join_args(map(fieldname_transform, argnames(create_fun_sig), argtypes(create_fun_sig))))$(add_fun_ptr ? ", fun_ptr_create" : ""))", nothing),
         Statement("vks = $(is_inner_constructor ? "new" : new_sdef.name)$broadcast_if_multiple_create_info($deref)", "vks"),
     ]
-    if is_handle_destructible(sdef.name)
+    if is_handle_destructible(sdef.name) && !is_free_command(handle_destruction_info[sdef.name][1])
         destroy_fun, destroyed_el, identifiers, types = handle_destruction_info[sdef.name]
         destroy_fun_fdef = api.funcs[destroy_fun]
+        add_fun_ptr ? push!(args, PositionalArgument("fun_ptr_destroy")) : nothing
         lambda_fun = "x -> $destroy_fun($(join_args(map(x -> x == fieldname_transform(destroyed_el, sdef.name) ? "x" : x, map(fieldname_transform, identifiers, types))))$(add_fun_ptr ? ", fun_ptr_destroy" : ""))"
         push!(body, Statement("finalizer$broadcast_if_multiple_create_info($(has_multiple_create_info ? "Ref($lambda_fun)" : lambda_fun), vks)", nothing))
     end
+    new_sig = Signature(new_sdef.name, is_allocation_command(create_fun) ? map(x -> x.name == identifier ? PositionalArgument("n") : x, args) : filter(x -> x.name ≠ identifier, args), kwargs)
     FDefinition(new_sig.name, new_sig, false, body, "")
 end
 
@@ -441,8 +446,8 @@ function accumulate_passes(sname, args, new_nametype_f, passes; common_pass_kwar
                 append!(body, body_statements)
                 pass_args.passes[typeof(el)] = true
             end
-            push!(pass_results[name], PassResult(el, deepcopy(pass_args)))
             pass_args.last_name = last_argname(body, tmp_name, new_name)
+            push!(pass_results[name], PassResult(el, deepcopy(pass_args)))
         end
         @assert length(passes) == length(pass_results[name]) "Number of passes ($(length(passes))) and pass_results ($(length(pass_results[name]))) differ for $name ($sname)"
     end

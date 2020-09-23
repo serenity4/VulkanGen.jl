@@ -45,7 +45,7 @@ Base.cconvert(T::Type{<: Ptr}, x::Handle) = x
 Base.unsafe_convert(T::Type, x::VulkanStruct) = x.vks
 Base.unsafe_convert(T::Type{Ptr{Nothing}}, x::Handle) = x.handle
 
-Base.broadcastable(x::VulkanStruct) = Ref(x)
+Base.broadcastable(x::VulkanStruct) = Ref(x) # indicate that VulkanStructs behave as scalars for broadcasting
 
 """
 
