@@ -27,7 +27,8 @@ function extract_type(param; include_pointer=true)
     endswith(type, "*") && include_pointer ? "Ptr{$(type_nostar)}" : type_nostar
 end
 
-extract_identifier(param) = split(replace(param.content, "const " => ""))[2]
+extract_identifier(param) = findfirst("./name", param).content
+getattr(node, attr; default = nothing) = haskey(node, attr) ? node[attr] : default
 
 function parent_name(node)
     parel = node.parentelement
@@ -40,7 +41,7 @@ function command_name(node)
 end
 
 function struct_name(node)
-    (!haskey(node, "category") || node["category"] ≠ "struct") && return struct_name(node.parentelement)
+    (!haskey(node, "category") || node["category"] ∉ ["struct", "union"]) && return struct_name(node.parentelement)
     node["name"]
 end
 
