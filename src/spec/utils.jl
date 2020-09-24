@@ -28,6 +28,12 @@ function extract_type(param; include_pointer=true)
 end
 
 extract_identifier(param) = split(replace(param.content, "const " => ""))[2]
+
+function parent_name(node)
+    parel = node.parentelement
+    parel.name == "command" ? command_name(parel) : parel.name == "type" && parel["category"] ∈ ["struct", "union"] ? struct_name(parel) : error("Unknown parent element:\n    $parel")
+end
+
 function command_name(node)
     isnothing(findfirst("proto", node)) && return command_name(node.parentelement)
     findfirst("proto/name", node).content
@@ -37,3 +43,5 @@ function struct_name(node)
     (!haskey(node, "category") || node["category"] ≠ "struct") && return struct_name(node.parentelement)
     node["name"]
 end
+
+is_constant(node) = any(split(node.content) .== "const")

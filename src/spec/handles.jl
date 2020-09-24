@@ -85,20 +85,3 @@ is_handle_destructible(type) = type ∈ keys(handle_destruction_info)
 
 handles_with_multiple_create_info = filter(x -> first(x.second) isa AbstractArray, handle_creation_info)
 is_handle_with_multiple_create_info(type) = type ∈ keys(handles_with_multiple_create_info)
-
-function fetch_structextends(xroot)
-    nodes = findall("//type[@category='struct' and @structextends]", xroot)
-    res = DefaultOrderedDict(() -> [])
-    for node ∈ nodes
-        push!(res[node["structextends"]], node["name"])
-    end
-    res
-end
-
-function fetch_returnedonly(xroot)
-    getindex.(findall("//type[@returnedonly='true']", xroot), "name")
-end
-
-struct_extensions = fetch_structextends(xroot)
-
-returnedonly_structs = fetch_returnedonly(xroot)

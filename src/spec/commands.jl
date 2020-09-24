@@ -1,3 +1,11 @@
+function fetch_enumeration_commands(xroot)
+    nodes = findall("//command[not(@name)]", xroot)
+    command_types = map(x -> extract_type.(findall(".//param", x), include_pointer=false), nodes)
+    command_name.([nodes[i] for i ∈ 1:length(command_types) if any(is_struct_returnedonly.(command_types[i]))])
+end
+
+enumeration_commands = fetch_enumeration_commands(xroot)
+
 function fetch_enumeration_command_counts(xroot)
     falsetrue_opts = findall("//param[@optional='false,true' and not(@len) and following-sibling::param[contains(@len, 'Count') or contains(@len, 'Size')]]", xroot)
     count_vars = Dict()

@@ -131,5 +131,21 @@ function optional_parameter_default_value(name, sname)
     last(params[findfirst(first.(params) .== name)])
 end
 
+function fetch_constant_parameters()
+    all_params = findall(".//param", xroot)
+    all_structs = findall(".//member", xroot)
+    res = DefaultOrderedDict(() -> String[])
+    for node ∈ (all_params..., all_structs...)
+        p = node.parentelement
+        if is_constant(node) && (!haskey(p, "category") || p["category"] ≠ "union")
+            sname = parent_name(node)
+            name = member_attr(node, "name")
+            push!(res[sname], name)
+        end
+    end
+    res
+end
+fetch_constant_parameters()
+
 @assert is_array_variable("pQueueFamilyIndices", "VkBufferCreateInfo")
 @assert is_count_variable("queueFamilyIndexCount", "VkBufferCreateInfo")
