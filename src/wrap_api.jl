@@ -33,6 +33,7 @@ exports(symbols) = "export $(join_args(symbols))"
 pre_wrap_code = """
 abstract type VulkanStruct end
 abstract type Handle <: VulkanStruct end
+abstract type ReturnedOnly <: VulkanStruct end
 abstract type Bag end
 struct BagEmpty <: Bag end
 const EmptyBag = BagEmpty()

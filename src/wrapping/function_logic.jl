@@ -45,6 +45,7 @@ function wrap_enumeration_command(fdef)
     kwargs = keyword_arguments(sig)
     new_fname = name_transform(fdef)
     new_sig = Signature(new_fname, args, kwargs)
+    # body, pass_results = accumulate_passes(fname, sig.args, pass_new_nametype(FDefinition), [ComputeLengthArgument(), InitializePointers()])
     body = Statement[]
     command_args = []
     for arg ∈ sig.args

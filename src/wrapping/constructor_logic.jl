@@ -13,6 +13,12 @@ function constructor(new_sdef, sdef)
         push!(defs, constructor(new_sdef, sdef, CreateVkHandle()))
         push!(defs, constructor(new_sdef, sdef, CreateVkHandle(), add_fun_ptr=true))
         # push!(defs, constructor(new_sdef, sdef, CreateVkHandleWithCreateInfo()))
+    elseif sname ∈ returnedonly_structs
+        vk_sig = Signature(sdef)
+        args_undropped = [name for (name, type) ∈ zip(argnames(vk_sig), argtypes(vk_sig)) if !drop_field(name, type, sname)]
+        body = [Statement("$(new_sdef.name)($(join_args("from_vk(" .* argtypes(Signature(new_sdef)) .* ", vks." .* args_undropped .* ")")))")]
+        fdef = FDefinition(new_sdef.name, Signature(new_sdef.name, [PositionalArgument("vks", sname)], KeywordArgument[]), true, body)
+        push!(defs, fdef) 
     elseif !is_handle(sname)
         if keeps_original_layout(sdef)
             push!(defs, constructor(new_sdef, sdef, GenericConstructor(), is_inner_constructor=false, add_type_annotations=false))
@@ -88,6 +94,11 @@ struct GenerateRefs <: Pass end
 Generate a pointer for any variable beginning with p[A-Z].
 """
 struct GeneratePointers <: Pass end
+
+"""
+Define a pointer that is to be passed to a Vulkan function for filling it with data.
+"""
+struct InitializePointers <: Pass end
 
 function has_bag(sname)
     !is_handle(sname) && is_vulkan_struct(sname) && any(map(x -> occursin("Cstring", x) || (is_ptr(x) && !is_extension_ptr(x)), collect(values(api.structs[sname].fields))))
@@ -181,6 +192,9 @@ struct PassResult{T <: Pass}
     pass_args::PassArgs
     is_triggered::Bool
 end
+
+Base.broadcastable(x::PassResult) = Ref(x)
+Base.broadcastable(x::PassArgs) = Ref(x)
 
 PassResult(pass::Pass, pass_args::PassArgs) = PassResult(pass, pass_args, is_triggered(typeof(pass), pass_args))
 
@@ -556,58 +570,20 @@ end
 
 function pass!(args::PassArgs, ::Type{GeneratePointers})
     @unpack type, name, tmp_name, new_name, new_type, last_name, passes = args
-    if !is_triggered(DefineSelfPointers, args) && startswith(name, r"p{1,2}[A-Z]") && !is_extension_ptr(type)
+    if !any(is_triggered.((DefineSelfPointers, InitializePointers), args)) && startswith(name, r"p{1,2}[A-Z]") && !is_extension_ptr(type)
         stts = Statement[]
         push!(stts, Statement("$name = unsafe_pointer($last_name)", name))
         stts
     end
 end
 
-# function pass!(args::PassArgs, ::Type{GeneratePointers})
-#     @unpack type, name, tmp_name, new_name, new_type, last_name, passes = args
-#     if !is_triggered(DefineSelfPointers, args) && startswith(name, r"p{1,2}[A-Z]")
-#         arg_check = is_abstractarray_type(new_type) ? "!isempty($last_name)" : "!isnothing($new_name)"
-#         refname = "$(last_name)_ref"
-#         preserving_obj = new_name
-#         if_begin = Statement("if $arg_check", nothing)
-#         if_end = Statement("end", nothing)
-#         if is_abstractarray_type(new_type)
-#             if new_type == "AbstractArray{String}"
-#                 reffed_obj = "$(last_name)_ptrarray"
-#                 sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name)
-#                 insert!(sts, 1, Statement("$reffed_obj = pointer.($last_name)", reffed_obj))
-#             else
-#                 reffed_obj = is_vulkan_type(inner_type(type)) ? "getproperty.($last_name, :vk)" : last_name
-#                 sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name)
-#             end
-#         elseif new_type == "String"
-#             reffed_obj = new_name
-#             # sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name, skip_ref=true, pointer_fun="pointer")
-#             sts = [Statement("$tmp_name = pointer($new_name)", tmp_name)]
-#         else
-#             reffed_obj = "$last_name.vk"
-#             sts = preserved_pointer_statements(refname, reffed_obj, preserving_obj, tmp_name)
-#         end
-#         sts = [
-#             if_begin,
-#             sts...,
-#         ]
-#         if tmp_name ≠ last_name
-#             val_else = (is_abstractarray_type(new_type) || is_ptr(new_type)) && !passes[AddDefaults] ? "C_NULL" : last_name
-#             push!(sts, Statement("else $tmp_name = $val_else", tmp_name))
-#         end
-#         push!(sts, if_end)
-#         return sts
-#     end
-#     nothing
-# end
-
-# function pass!(args::PassArgs, ::Type{AutomateCreateInfo})
-#     @unpack type, name, sdef = args
-#     if occursin("CreateInfo", name)
-#         Statement("create_info = 1", "create_info", nothing)
-#     end
-# end
+function pass!(args::PassArgs, ::Type{InitializePointers})
+    @unpack name, type, new_name, new_type = args
+    if !is_constant(name, sname) && is_ptr(type) && !is_array_type(new_type)
+        eltype = inner_type(type)
+        return Statement("$name = Ref{$eltype}()", name)
+    end
+end
 
 # a parameter is a keyword argument that relates to the use of a particular function, e.g. flags or allocators.
 # a keyword argument is an argument with a default value.

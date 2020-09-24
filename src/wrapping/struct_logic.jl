@@ -30,6 +30,13 @@ function structure(sdef)
     if is_handle(sname)
         new_fields["handle"] = sname
         abstract_type = "Handle"
+    elseif sname ∈ returnedonly_structs
+        abstract_type = "ReturnedOnly"
+        for (name, type) ∈ sdef.fields
+            drop_field(name, type, sname) && continue
+            new_name, new_type = field_transform(name, type, sname)
+            new_fields[new_name] = new_type
+        end
     else
         abstract_type = "VulkanStruct"
         new_fields["vks"] = sname
