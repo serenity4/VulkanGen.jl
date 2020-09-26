@@ -38,10 +38,10 @@ end
 
 function fetch_parameters()
     nodes = findall("//command[not(@name)]", xroot)
-    df = DataFrame([String, String, String, EzXML.Node, Bool, Bool, Bool], [:command, :name, :type, :node, :constant, :externsync, :optional])
+    df = DataFrame([String, String, String, EzXML.Node, Bool, Bool, Bool, Union{Nothing, String}, Array{String, 1}], [:command, :name, :type, :node, :constant, :externsync, :optional, :len, :arglen])
     for node ∈ nodes
         for x ∈ findall("./param", node)
-            push!(df, (parent_name(x), extract_identifier(x), extract_type(x), x, is_constant(x), externsync(x), is_optional(x)))
+            push!(df, (parent_name(x), extract_identifier(x), extract_type(x), x, is_constant(x), externsync(x), is_optional(x), len(x), arglen(x)))
         end
     end
     df
@@ -51,13 +51,32 @@ is_optional(node) = haskey(node, "optional") && occursin("true", node["optional"
 
 function fetch_struct_fields()
     nodes = findall("//type[@category='union' or @category='struct']", xroot)
-    df = DataFrame([String, String, String, EzXML.Node, Bool, Bool, Bool], [:struct, :name, :type, :node, :constant, :externsync, :optional])
+    df = DataFrame([String, String, String, EzXML.Node, Bool, Bool, Bool, Union{Nothing, String}, Array{String, 1}], [:struct, :name, :type, :node, :constant, :externsync, :optional, :len, :arglen])
     for node ∈ nodes
         for x ∈ findall("./member", node)
-            push!(df, (parent_name(x), extract_identifier(x), extract_type(x), x, is_constant(x), externsync(x), is_optional(x)))
+            push!(df, (parent_name(x), extract_identifier(x), extract_type(x), x, is_constant(x), externsync(x), is_optional(x), len(x), arglen(x, neighbor_type="member")))
         end
     end
     df
+end
+
+function len(node)
+    haskey(node, "altlen") && return node["altlen"]
+    val = getattr(node, "len")
+    isnothing(val) && return val
+    val_arr = filter(x -> x ≠ "null-terminated", split(val, ","))
+    @assert length(val_arr) <= 1
+    isempty(val_arr) ? nothing : first(val_arr)
+end
+
+function arglen(node; neighbor_type="param")
+    neighbors = findall("../$neighbor_type", node)
+    name = findfirst("./name", node).content
+    arglens = String[]
+    for node ∈ neighbors
+        len(node) == name ? push!(arglens, findfirst("./name", node).content) : nothing
+    end
+    arglens
 end
 
 function fetch_types()
@@ -149,9 +168,8 @@ function fetch_destruction_info()
     df
 end
 
-const vulkan_params = fetch_parameters()
-const vulkan_struct_params = fetch_struct_parameters()
-const vulkan_fields = fetch_struct_fields()
+vulkan_params = fetch_parameters()
+vulkan_fields = fetch_struct_fields()
 const vulkan_structs = fetch_structs()
 const vulkan_functions = fetch_functions()
 const vulkan_types = fetch_types()
