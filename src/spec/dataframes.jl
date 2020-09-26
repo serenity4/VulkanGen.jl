@@ -170,6 +170,7 @@ end
 is_category(type, cat) = type ∈ (vulkan_types |> @filter(_.category == cat) |> DataFrame).name
 is_enum(type) = is_category(type, "enum")
 is_bitmask(type) = is_category(type, "bitmask")
+isalias(type) = !isnothing(vulkan_types[findfirst(x -> x == type, vulkan_types.name), :].alias)
 
 
 @assert is_handle("VkInstance")
@@ -180,6 +181,7 @@ is_bitmask(type) = is_category(type, "bitmask")
 @assert !is_handle_destructible("VkPhysicalDevice")
 @assert is_handle_with_multiple_create_info("VkPipeline")
 @assert !is_handle_with_multiple_create_info("VkPhysicalDevice")
+@assert issubset(filter(!isalias, unique(vulkan_creation_info.name)), vulkan_handles.name)
 
 @assert is_bitmask("VkQueryPoolCreateFlags")
 @assert is_enum("VkDebugUtilsMessageSeverityFlagBitsEXT")
