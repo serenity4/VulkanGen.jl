@@ -167,6 +167,10 @@ function is_handle_with_multiple_create_info(type)
     !isnothing(index) && length(index) > 1
 end
 
+is_category(type, cat) = type ∈ (vulkan_types |> @filter(_.category == cat) |> DataFrame).name
+is_enum(type) = is_category(type, "enum")
+is_bitmask(type) = is_category(type, "bitmask")
+
 
 @assert is_handle("VkInstance")
 @assert !is_handle("VkInstanceCreateInfo")
@@ -176,3 +180,9 @@ end
 @assert !is_handle_destructible("VkPhysicalDevice")
 @assert is_handle_with_multiple_create_info("VkPipeline")
 @assert !is_handle_with_multiple_create_info("VkPhysicalDevice")
+
+@assert is_bitmask("VkQueryPoolCreateFlags")
+@assert is_enum("VkDebugUtilsMessageSeverityFlagBitsEXT")
+@assert !is_bitmask("VkInstance")
+@assert is_enum("VkResult")
+@assert !is_enum("VkInstance")
