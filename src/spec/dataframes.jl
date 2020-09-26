@@ -5,6 +5,7 @@ struct QueueTransfer <: QueueType end
 struct QueueSparseBinding <: QueueType end
 
 @enum COMMAND_TYPE CREATE=1 DESTROY ALLOCATE FREE COMMAND ENUMERATE
+@enum STRUCT_TYPE CREATE_INFO=1 ALLOCATE_INFO GENERIC_INFO DATA PROPERTY
 
 queue_maps = OrderedDict(
     "compute" => QueueCompute,
@@ -71,16 +72,20 @@ end
 
 function fetch_structs()
     nodes = findall("//type[(@category='union' or @category='struct')]", xroot)
-    df = DataFrame([String, Bool, Union{Nothing, Array{String, 1}}], [:name, :returnedonly, :extends])
+    df = DataFrame([String, STRUCT_TYPE, Bool, Union{Nothing, Array{String, 1}}], [:name, :type, :returnedonly, :extends])
     for node ∈ nodes
-        push!(df, (getattr(node, "name"), haskey(node, "returnedonly"), (haskey(node, "structextends") ? split(node["structextends"], ",") : nothing)))
+        name = getattr(node, "name")
+        @assert !isnothing(name) "Found the following structure without name:\n    $node"
+        returnedonly = haskey(node, "returnedonly")
+        type = returnedonly ? PROPERTY : occursin("CreateInfo", name) ? CREATE_INFO : occursin("AllocateInfo", name) ? ALLOCATE_INFO : occursin("Info", name) ? GENERIC_INFO : DATA
+        push!(df, (name, type, returnedonly, (haskey(node, "structextends") ? split(node["structextends"], ",") : nothing)))
     end
     df
 end
 
 function is_struct_returnedonly(t)
-    match = findfirst(x -> x == t, structs.name)
-    isnothing(match) ? false : structs.returnedonly[match]
+    match = findfirst(x -> x == t, vulkan_structs.name)
+    isnothing(match) ? false : vulkan_structs.returnedonly[match]
 end
 
 function fetch_handles()
@@ -114,10 +119,60 @@ function fetch_functions()
     df
 end
 
-const params = fetch_parameters()
-const fields = fetch_struct_fields()
-const structs = fetch_structs()
-const functions = fetch_functions()
+function fetch_creation_info()
+    nodes = findall("//command/proto[contains(./child::name, 'vkCreate') or contains(./child::name, 'vkAllocate')]", xroot)
+    df = DataFrame([String, String, String, Array{String, 1}, Array{String, 1}], [:name, :create_function, :identifier, :create_info_structs, :create_info_identifiers])
+    vulkan_create_info_structs = (vulkan_structs |> @filter(_.type ∈ [CREATE_INFO, ALLOCATE_INFO]) |> DataFrame).name
+    for node ∈ nodes
+        create_el_node = findlast("../param", node)
+        name = findfirst("./type", create_el_node).content
+        create_fun = findfirst("./name", node).content
+        create_info_nodes = filter!(x -> findfirst("./type", x).content ∈ vulkan_create_info_structs, findall("../param", node))
+        create_info_structs = getproperty.(findfirst.("./type", create_info_nodes), :content)
+        create_info_identifiers = getproperty.(findfirst.("./name", create_info_nodes), :content)
+        identifier = findfirst("./name", create_el_node).content
+        push!(df, (name, create_fun, identifier, create_info_structs, create_info_identifiers))
+    end
+    df
+end
 
+function fetch_destruction_info()
+    nodes = findall("//command/proto[contains(./child::name, 'vkDestroy') or contains(./child::name, 'vkFree')]", xroot)
+    df = DataFrame([String, String, String], [:name, :destroy_function, :identifier])
+    for node ∈ nodes
+        destroy_fun = findfirst("./name", node).content
+        destroy_el_node = findlast("../param[@externsync]", node)
+        name = findfirst("./type", destroy_el_node).content
+        identifier = findfirst("./name", destroy_el_node).content
+        push!(df, (name, destroy_fun, identifier))
+    end
+    df
+end
+
+const vulkan_params = fetch_parameters()
+const vulkan_struct_params = fetch_struct_parameters()
+const vulkan_fields = fetch_struct_fields()
+const vulkan_structs = fetch_structs()
+const vulkan_functions = fetch_functions()
 const vulkan_types = fetch_types()
-const handles = fetch_handles()
+const vulkan_handles = fetch_handles()
+const vulkan_creation_info = fetch_creation_info()
+const vulkan_destruction_info = fetch_destruction_info()
+
+is_handle(type) = type ∈ (vulkan_handles.name..., "HANDLE")
+is_handle_with_create_info(type) = type ∈ vulkan_creation_info.name
+is_handle_destructible(type) = type ∈ vulkan_destruction_info.name
+function is_handle_with_multiple_create_info(type)
+    index = findall(vulkan_creation_info.name .== type)
+    !isnothing(index) && length(index) > 1
+end
+
+
+@assert is_handle("VkInstance")
+@assert !is_handle("VkInstanceCreateInfo")
+@assert is_handle_with_create_info("VkInstance")
+@assert !is_handle_with_create_info("VkPhysicalDevice")
+@assert is_handle_destructible("VkDevice")
+@assert !is_handle_destructible("VkPhysicalDevice")
+@assert is_handle_with_multiple_create_info("VkPipeline")
+@assert !is_handle_with_multiple_create_info("VkPhysicalDevice")
