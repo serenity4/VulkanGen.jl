@@ -3,6 +3,7 @@ using DataStructures
 using LightGraphs
 using Vulkan_Headers_jll:vk_xml
 using DataFrames
+using Query
 
 xdoc = readxml(vk_xml)
 xroot = xdoc.root
