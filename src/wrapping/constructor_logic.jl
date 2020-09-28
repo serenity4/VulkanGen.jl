@@ -22,9 +22,11 @@ function constructor(new_sdef, sdef)
         body = [Statement("$(new_sdef.name)($(join_args("from_vk(" .* argtypes(Signature(new_sdef)) .* ", vks." .* args_undropped .* ")")))")]
         fdef = FDefinition(new_sdef.name, Signature(new_sdef.name, [PositionalArgument("vks", sname)], KeywordArgument[]), true, body)
         push!(defs, fdef) 
+        push!(defs, FDefinition("from_vk", Signature("from_vk", PositionalArgument.(["T::Type{$(new_sdef.name)}", "x::$sname"]), KeywordArgument[]), true, [Statement("$(new_sdef.name)(x)")]))
     elseif !is_handle(sname)
         if keeps_original_layout(sdef)
             push!(defs, constructor(new_sdef, sdef, GenericConstructor(), is_inner_constructor=false, add_type_annotations=false))
+            push!(defs, FDefinition("from_vk", Signature("from_vk", PositionalArgument.(["T::Type{$(new_sdef.name)}", "x::$sname"]), KeywordArgument[]), true, [Statement("$(new_sdef.name)($(join_args("x." .* collect(keys(sdef.fields)))))")]))
             if length(Signature(new_sdef).args) == 1
                 new_sdef.inner_constructor = FDefinition(new_sdef.name, Signature(new_sdef.name, [PositionalArgument("vks", sname)], KeywordArgument[]), true, [Statement("new(vks)")])
             end
@@ -311,8 +313,8 @@ function name_hierarchy(name_depth, names...)
     names[1:name_depth], names[name_depth + 1]
 end
 
-is_enabled(pass::Type{T}, args::PassArgs) where {T <: Pass} = any(isa.(Ref(T), keys(args.passes)))
-is_triggered(pass::Type{T}, args::PassArgs) where {T <: Pass} = is_enabled(pass, args) && args.passes[pass]
+is_enabled(::Type{T}, args::PassArgs) where {T <: Pass} = any(T ∈ keys(args.passes))
+is_triggered(::Type{T}, args::PassArgs) where {T <: Pass} = is_enabled(T, args) && args.passes[T]
 
 function check_is_default(name, type, action)
     if is_ptr(type)
@@ -577,15 +579,15 @@ end
 function pass!(args::PassArgs, ::Type{GeneratePointers})
     @unpack type, name, tmp_name, new_name, new_type, last_name, passes = args
     if !any(is_triggered.((DefineSelfPointers, InitializePointers), args)) && startswith(name, r"p{1,2}[A-Z]") && !is_extension_ptr(type)
-        stts = Statement[]
-        push!(stts, Statement("$name = unsafe_pointer($last_name)", name))
-        stts
+        Statement("$name = unsafe_pointer($last_name)", name)
     end
 end
 
 function pass!(args::PassArgs, ::Type{InitializePointers})
-    @unpack name, type, new_name, new_type = args
-    if !is_constant(name, sname) && is_ptr(type) && !is_array_type(new_type)
+    @unpack name, type, new_name, new_type, sname = args
+    matches = info_df(sname)[(parent=sname,)]
+    inf = info(name, sname)
+    if !inf.constant && is_ptr(type) && !is_array_type(new_type) && name == last(matches.name)
         eltype = inner_type(type)
         return Statement("$name = Ref{$eltype}()", name)
     end
