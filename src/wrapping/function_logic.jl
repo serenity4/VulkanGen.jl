@@ -35,11 +35,34 @@ end
 
 pass_new_nametype(::Type{FDefinition}) = (x, y, z) -> (arg = arg_transform(PositionalArgument(x, y)) ; (arg.name, arg.type))
 
+"""
+Get initialization arguments from the results of `accumulate_passes`.
+"""
+function init_args(pass_results, body, fdef::FDefinition; use_all_args=true, name_depth=2)
+    args = String[]
+    for (name, pr_list) ∈ pass_results
+        pass_args = last(pr_list).pass_args
+        @unpack tmp_name, new_name, type, new_type, sname = pass_args
+        # if is_ptr(type) && inner_type(type) == "Cstring"
+        #     push!(args, new_name * "_ptrarray")
+        if (!any(values(pass_args.passes)) || use_all_args)
+            last_name = last_argname(body, name_hierarchy(name_depth, name, tmp_name, new_name)...)
+            push!(args, last_name)
+        end
+    end
+    args
+end
+
+
 function wrap_enumeration_command(fdef)
     sig = fdef.signature
     fname = fdef.name
     !has_count_to_be_filled(fname) && return wrap_generic(fdef)
-    enumerated_type = remove_pointer(enumeration_command_array_variable(fname).type)
+    arr_row = enumeration_command_array_variable(fname)
+    count_row = enumeration_command_count_variable(fname)
+    count_new_name = fieldname_transform(count_row.name, count_row.type)
+    arr_new_name = fieldname_transform(arr_row.name, arr_row.type)
+    enumerated_type = inner_type(arr_row.type)
     args = arguments(sig)
     kwargs = keyword_arguments(sig)
     new_fname = name_transform(fdef)
@@ -47,31 +70,18 @@ function wrap_enumeration_command(fdef)
     # body, pass_results = accumulate_passes(fname, sig.args, pass_new_nametype(FDefinition), [ComputeLengthArgument(), InitializePointers()])
     body = Statement[]
     command_args = []
-    for arg ∈ sig.args
-        name, type = arg.name, arg.type
-        new_name = fieldname_transform(name, type)
-        if is_count_variable(name, fname)
-            push!(command_args, "count")
-        elseif is_array_variable(name, fname)
-            push!(command_args, "arr")
-        elseif is_handle(type)
-            push!(command_args, new_name)
-        elseif is_ptr(type)
-            transform = "pointer($new_name)"
-            push!(command_args, is_parameter(name, fname) ? "isnothing($new_name) ? $(default(name, type)) : $transform" : transform)
-        elseif is_parameter(name, fname)
-            push!(command_args, new_name)
-        end
-    end
+    call_args = map(x -> fieldname_transform(x.name, x.type), sig.args)
+    first_call_args = replace(join_args(call_args), arr_new_name => "C_NULL")
+    second_call_args = join_args(call_args)
     body = [
         body...,
-        Statement("count = Ref{UInt32}(0)", "count"),
-        Statement("@check $(fdef.name)($(join_args([command_args[1:end - 1]..., "C_NULL"])))"),
-        Statement("arr = Array{$(enumerated_type)}(undef, count[])", "arr"),
-        Statement("@check $(fdef.name)($(join_args(command_args)))"),
+        Statement("$(count_new_name) = Ref{UInt32}(0)", count_new_name),
+        Statement("$(checked_function_call(fdef))($first_call_args)"),
+        Statement("$(arr_new_name) = Array{$(enumerated_type)}(undef, $(count_new_name)[])", arr_new_name),
+        Statement("$(checked_function_call(fdef))($second_call_args)"),
     ]
     enumerated_type_new = name_transform(enumerated_type, SDefinition)
-    convert_statement = Statement(enumerated_type == "void" ? "arr" : "$enumerated_type_new.(arr)")
+    convert_statement = Statement(enumerated_type == "void" ? arr_new_name : "$enumerated_type_new.($(arr_new_name))")
     push!(body, convert_statement)
     FDefinition(new_fname, new_sig, false, body)
 end
@@ -95,18 +105,26 @@ function wrap_generic(fdef)
     sig = fdef.signature
     args, kwargs = arguments(sig, transform_name=true), keyword_arguments(sig, transform_name=true)
     new_fname = name_transform(fdef.name, FDefinition)
-    new_sig = Signature(new_fname, args, kwargs)
     # body = [Statement("$(sig.name)($(join_args(argnames(new_sig))))")]
     # kept_args = arguments(sig, transform_name=false, drop_type=false)
     # fname = name_transform(fdef.name, FDefinition)
-    body, pass_results = accumulate_passes(fdef.name, fdef.signature.args, pass_new_nametype(FDefinition), [ComputeLengthArgument()])
+    body, pass_results = accumulate_passes(fdef.name, fdef.signature.args, pass_new_nametype(FDefinition), [ComputeLengthArgument(), InitializePointers()])
     # new_sig = Signature(fname, remove_type.(args), kwargs)
-    last_args_used = getproperty.(getproperty.(last.(values(pass_results)), :pass_args), :last_name)
+    last_args_used = init_args(pass_results, body, fdef)
+    triggered_vars_ip = [x.first for x ∈ pass_results if x.second[2].is_triggered]
+    triggered_vars_ip_new = fieldname_transform.(triggered_vars_ip, nothing)
+    new_sig = Signature(new_fname, filter(x -> x.name ∉ triggered_vars_ip_new, args), kwargs)
     # for (i, arg) ∈ enumerate(sig.args)
     #     tmp_argname(arg.name, arg.type) ∉ last_args_used && arg.name ∉ last_args_used && insert!(last_args_used, i, arg.name)
     # end
     _m = fdef.return_type == "VkResult" ? "@check " : ""
     push!(body, Statement("$(checked_function_call(fdef))($(join_args(last_args_used)))"))
+    @assert length(triggered_vars_ip) <= 1
+    if !isempty(triggered_vars_ip)
+        var = first(triggered_vars_ip)
+        type = inner_type(last(pass_results[var]).pass_args.type)
+        push!(body, Statement(is_vulkan_struct(type) ? "$(name_transform(type, SDefinition))($var[])" : "$var[]", var))
+    end
     FDefinition(new_fname, new_sig, false, body, "Generic definition")
 end
 
