@@ -2,7 +2,10 @@ function constructor(new_sdef, sdef)
     defs = []
     sname = sdef.name
     if is_handle_with_multiple_create_info(sname)
-        for (fun, type, id) ∈ zip(handle_creation_info[sname]...)
+        ci_indices = findall(x -> x.name == sdef.name, eachrow(vulkan_creation_info))
+        for index ∈ ci_indices
+            ci = vulkan_creation_info[index, :]
+            fun, type, id = (ci.create_function, first(ci.create_info_structs), first(ci.create_info_identifiers))
             cons = constructor(new_sdef, sdef, CreateVkHandle(), fun, type, id; add_create_info_type_annotation=true, is_inner_constructor=false)
             !isnothing(cons) && push!(defs, cons)
             cons = constructor(new_sdef, sdef, CreateVkHandle(), fun, type, id; add_create_info_type_annotation=true, is_inner_constructor=false, add_fun_ptr=true)
@@ -13,16 +16,10 @@ function constructor(new_sdef, sdef)
         push!(defs, constructor(new_sdef, sdef, CreateVkHandle()))
         push!(defs, constructor(new_sdef, sdef, CreateVkHandle(), add_fun_ptr=true))
         # push!(defs, constructor(new_sdef, sdef, CreateVkHandleWithCreateInfo()))
-    elseif sname ∈ returnedonly_structs
-        vk_sig = Signature(sdef)
-        args_undropped = [name for (name, type) ∈ zip(argnames(vk_sig), argtypes(vk_sig)) if !drop_field(name, type, sname)]
-        body = [Statement("$(new_sdef.name)($(join_args("from_vk(" .* argtypes(Signature(new_sdef)) .* ", vks." .* args_undropped .* ")")))")]
-        fdef = FDefinition(new_sdef.name, Signature(new_sdef.name, [PositionalArgument("vks", sname)], KeywordArgument[]), true, body)
-        push!(defs, fdef) 
     elseif !is_handle(sname)
         if keeps_original_layout(sdef)
             push!(defs, constructor(new_sdef, sdef, GenericConstructor(), is_inner_constructor=false, add_type_annotations=false))
-            if length(arguments(Signature(new_sdef))) == 1
+            if length(Signature(new_sdef).args) == 1
                 new_sdef.inner_constructor = FDefinition(new_sdef.name, Signature(new_sdef.name, [PositionalArgument("vks", sname)], KeywordArgument[]), true, [Statement("new(vks)")])
             end
         else
@@ -35,6 +32,12 @@ function constructor(new_sdef, sdef)
         #         push!(defs, constructor(new_sdef, sdef, GenericConstructor()))
         #     end
         # end
+    elseif !is_handle(sname) && dfmatch(vulkan_structs, :name, sname).returnedonly
+        vk_sig = Signature(sdef)
+        args_undropped = [name for (name, type) ∈ zip(argnames(vk_sig), argtypes(vk_sig)) if !drop_field(name, type, sname)]
+        body = [Statement("$(new_sdef.name)($(join_args("from_vk(" .* argtypes(Signature(new_sdef)) .* ", vks." .* args_undropped .* ")")))")]
+        fdef = FDefinition(new_sdef.name, Signature(new_sdef.name, [PositionalArgument("vks", sname)], KeywordArgument[]), true, body)
+        push!(defs, fdef) 
     end
     defs
 end
@@ -168,7 +171,7 @@ end
 """
 Encode possible arguments available for each Pass.
 """
-@with_kw mutable struct PassArgs
+Base.@kwdef mutable struct PassArgs
     name = nothing
     type = nothing
     new_name = nothing
@@ -176,8 +179,6 @@ Encode possible arguments available for each Pass.
     sdef = nothing
     fdef = nothing
     arg = nothing
-    count_arg = nothing
-    array_arg = nothing
     last_name = nothing
     tmp_name = nothing
     passes = nothing
@@ -291,7 +292,7 @@ function init_args(pass_results, body, ::GenericConstructor; use_all_args=true, 
         else (!any(values(pass_args.passes)) || use_all_args)
             last_name = last_argname(body, name_hierarchy(name_depth, name, tmp_name, new_name)...)
             if !isnothing(sname) && is_optional_parameter(name, sname)
-                default_val = optional_parameter_default_value(name, sname)
+                default_val = default(name, type)
                 name_with_test = "$last_name == $default_val ? $default_val : "
             else
                 name_with_test = ""
@@ -359,7 +360,8 @@ function constructor(new_sdef, sdef, definition::ConstructorNoVKS; add_type_anno
 end
 
 function constructor(new_sdef, sdef, def::CreateVkHandle; add_fun_ptr=false)
-    create_fun, create_info_struct, create_info_id = handle_creation_info[sdef.name]
+    ci = dfmatch(vulkan_creation_info, :name, sdef.name)
+    create_fun, create_info_struct, create_info_id = (ci.create_function, first(ci.create_info_structs), first(ci.create_info_identifiers))
     constructor(new_sdef, sdef, def, create_fun, create_info_struct, create_info_id; add_create_info_type_annotation=true, is_inner_constructor=false, add_fun_ptr)
 end
 
@@ -378,7 +380,7 @@ function constructor(new_sdef, sdef, ::CreateVkHandle, create_fun, create_info_s
     identifier = last(args).name
     add_fun_ptr ? push!(args, PositionalArgument("fun_ptr_create")) : nothing
     new_sig = Signature(new_sdef.name, filter(x -> x.name ≠ identifier, args), kwargs)
-    creates_multiple_handles = is_allocation_command(create_fun)
+    creates_multiple_handles = is_command_type(create_fun, ALLOCATE)
     body = has_multiple_create_info ? [
         Statement("create_info_count = length($new_create_info_id)"),
         Statement("$identifier = Array{$(sdef.name), 1}(undef, create_info_count)", identifier),
@@ -395,14 +397,19 @@ function constructor(new_sdef, sdef, ::CreateVkHandle, create_fun, create_info_s
         Statement("@check $(create_fun_sig.name)($(join_args(map(fieldname_transform, argnames(create_fun_sig), argtypes(create_fun_sig))))$(add_fun_ptr ? ", fun_ptr_create" : ""))", nothing),
         Statement("vks = $(is_inner_constructor ? "new" : new_sdef.name)$broadcast_if_multiple_create_info($deref)", "vks"),
     ]
-    if is_handle_destructible(sdef.name) && !is_free_command(handle_destruction_info[sdef.name][1])
-        destroy_fun, destroyed_el, identifiers, types = handle_destruction_info[sdef.name]
-        destroy_fun_fdef = api.funcs[destroy_fun]
-        add_fun_ptr ? push!(args, PositionalArgument("fun_ptr_destroy")) : nothing
-        lambda_fun = "x -> $destroy_fun($(join_args(map(x -> x == fieldname_transform(destroyed_el, sdef.name) ? "x" : x, map(fieldname_transform, identifiers, types))))$(add_fun_ptr ? ", fun_ptr_destroy" : ""))"
-        push!(body, Statement("finalizer$broadcast_if_multiple_create_info($(has_multiple_create_info ? "Ref($lambda_fun)" : lambda_fun), vks)", nothing))
+    if is_handle_destructible(sdef.name)
+        inf = dfmatch(vulkan_destruction_info, :name, sdef.name)
+        destroy_fun = inf.destroy_function
+        if !is_command_type(destroy_fun, FREE)
+            destroyed_el = inf.identifier
+            destroy_fun_fdef = api.funcs[destroy_fun]
+            identifiers, types = argnames(destroy_fun_fdef.signature), argtypes(destroy_fun_fdef.signature)
+            add_fun_ptr ? push!(args, PositionalArgument("fun_ptr_destroy")) : nothing
+            lambda_fun = "x -> $destroy_fun($(join_args(map(x -> x == fieldname_transform(destroyed_el, sdef.name) ? "x" : x, map(fieldname_transform, identifiers, types))))$(add_fun_ptr ? ", fun_ptr_destroy" : ""))"
+            push!(body, Statement("finalizer$broadcast_if_multiple_create_info($(has_multiple_create_info ? "Ref($lambda_fun)" : lambda_fun), vks)", nothing))
+        end
     end
-    new_sig = Signature(new_sdef.name, is_allocation_command(create_fun) ? map(x -> x.name == identifier ? PositionalArgument("n") : x, args) : filter(x -> x.name ≠ identifier, args), kwargs)
+    new_sig = Signature(new_sdef.name, is_command_type(create_fun, ALLOCATE) ? map(x -> x.name == identifier ? PositionalArgument("n") : x, args) : filter(x -> x.name ≠ identifier, args), kwargs)
     FDefinition(new_sig.name, new_sig, false, body, "")
 end
 
@@ -445,11 +452,9 @@ function accumulate_passes(sname, args, new_nametype_f, passes; common_pass_kwar
     @assert unique(typeof.(passes)) == typeof.(passes) "A Pass type cannot be provided more than once"
     for arg ∈ args
         name, type = arg.name, arg.type
-        count_arg = count_variable(name, sname)
         tmp_name = tmp_argname(name, type)
         new_name, new_type = new_nametype_f(name, type, sname)
-        array_arg = isnothing(count_arg) ? array_variable(name, sname) : associated_array_variable(count_arg, sname)
-        pass_args = PassArgs(; name, type, arg, new_name, new_type, sdef=nothing, fdef=nothing, count_arg, array_arg, last_name=last_argname(body, tmp_name, new_name), tmp_name, passes=Dict(typeof.(passes) .=> false), sname)
+        pass_args = PassArgs(; name, type, arg, new_name, new_type, sdef=nothing, fdef=nothing, last_name=last_argname(body, tmp_name, new_name), tmp_name, passes=Dict(typeof.(passes) .=> false), sname)
         setproperty!.(Ref(pass_args), keys(common_pass_kwargs), values(common_pass_kwargs))
         for el ∈ passes
             pass_func = hasfield(typeof(el), :pass!) ? el.pass! : pass! # prioritize preprocessed pass inside struct
@@ -518,8 +523,9 @@ end
 # end
 
 function pass!(args::PassArgs, ::Type{ComputeLengthArgument})
-    @unpack tmp_name, name, array_arg, count_arg, type = args
-    if count_arg == name
+    @unpack tmp_name, name, sname, type = args
+    if is_count_variable(name, sname)
+        array_arg = first(associated_array_variables(name, sname))
         array_arg_new_name = fieldname_transform(array_arg, type)
         return Statement("$tmp_name = pointer_length($array_arg_new_name)", tmp_name)
     end
@@ -590,7 +596,7 @@ end
 # all structs have arguments, some of which are turned into keyword arguments if default values are defined
 
 function drop_argument(name, sname)
-    is_enumeration_command(sname) && name ∈ [enumeration_command_count_variable(sname), enumeration_command_array_variable(sname)] && return true
+    is_command(sname) && is_command_type(sname, ENUMERATE) && has_count_to_be_filled(sname) && name == enumeration_command_array_variable(sname).name && return true
     name == "sType" && return true
     is_count_variable(name, sname) && return true
 end
@@ -618,7 +624,7 @@ end
 
 function parameters(sig; expose_create_info_kwargs=false)
     param_args = filter(x -> is_parameter(x.name, sig.name), sig.args)
-    OrderedDict(name => value for (name, value) ∈ zip(param_args, map(x -> optional_parameter_default_value(x.name, sig.name), param_args)))
+    OrderedDict(name => value for (name, value) ∈ zip(param_args, map(x -> default(x.name, x.type), param_args)))
 end
 
 function arguments(sig; expose_create_info_kwargs = false, drop_type=true, transform_type = false, transform_name = true, remove_parameters=true)

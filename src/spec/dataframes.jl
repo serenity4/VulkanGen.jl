@@ -6,6 +6,9 @@ struct QueueSparseBinding <: QueueType end
 
 @enum COMMAND_TYPE CREATE=1 DESTROY ALLOCATE FREE COMMAND ENUMERATE
 @enum STRUCT_TYPE CREATE_INFO=1 ALLOCATE_INFO GENERIC_INFO DATA PROPERTY
+@enum PARAM_REQUIREMENT OPTIONAL=1 REQUIRED POINTER_OPTIONAL POINTER_REQUIRED
+
+PARAM_REQUIREMENT(node::EzXML.Node) = !haskey(node, "optional") || node["optional"] == "false" ? REQUIRED : PARAM_REQUIREMENT(findfirst(node["optional"] .== ["true", "false", "true,false", "false,true"]))
 
 queue_maps = OrderedDict(
     "compute" => QueueCompute,
@@ -29,6 +32,7 @@ function queue_compatibility(node)
     queue.(queues)
 end
 
+
 render_pass_compatibility(node) = (nr = node["renderpass"]; nr == "both" ? [RenderPassInside(), RenderPassOutside()] : nr == "inside" ? [RenderPassInside()] : nr == "outside" ? [RenderPassOutside()] : error("Unknown render pass compatibility"))
 
 function externsync(node)
@@ -38,23 +42,23 @@ end
 
 function fetch_parameters()
     nodes = findall("//command[not(@name)]", xroot)
-    df = DataFrame([String, String, String, EzXML.Node, Bool, Bool, Bool, Union{Nothing, String}, Array{String, 1}], [:command, :name, :type, :node, :constant, :externsync, :optional, :len, :arglen])
+    df = DataFrame([String, String, String, Bool, Bool, PARAM_REQUIREMENT, Union{Nothing, String}, Array{String, 1}], [:parent, :name, :type, :constant, :externsync, :param_requirement, :len, :arglen])
     for node ∈ nodes
         for x ∈ findall("./param", node)
-            push!(df, (parent_name(x), extract_identifier(x), extract_type(x), x, is_constant(x), externsync(x), is_optional(x), len(x), arglen(x)))
+            push!(df, (parent_name(x), extract_identifier(x), extract_type(x), is_constant(x), externsync(x), PARAM_REQUIREMENT(x), len(x), arglen(x)))
         end
     end
     df
 end
 
-is_optional(node) = haskey(node, "optional") && occursin("true", node["optional"])
 
 function fetch_struct_fields()
     nodes = findall("//type[@category='union' or @category='struct']", xroot)
-    df = DataFrame([String, String, String, EzXML.Node, Bool, Bool, Bool, Union{Nothing, String}, Array{String, 1}], [:struct, :name, :type, :node, :constant, :externsync, :optional, :len, :arglen])
+    df = DataFrame([String, String, String, Bool, Bool, PARAM_REQUIREMENT, Union{Nothing, String}, Array{String, 1}], [:parent, :name, :type, :constant, :externsync, :param_requirement, :len, :arglen])
     for node ∈ nodes
         for x ∈ findall("./member", node)
-            push!(df, (parent_name(x), extract_identifier(x), extract_type(x), x, is_constant(x), externsync(x), is_optional(x), len(x), arglen(x, neighbor_type="member")))
+            id = extract_identifier(x)
+            push!(df, (parent_name(x), id == "module" ? "_module" : id, extract_type(x), is_constant(x), externsync(x), PARAM_REQUIREMENT(x), len(x), arglen(x, neighbor_type="member")))
         end
     end
     df
@@ -120,12 +124,13 @@ end
 
 function fetch_functions()
     nodes = findall("//command[not(@name) or (@name and @alias)]", xroot)
-    df = DataFrame([String, Union{Nothing, COMMAND_TYPE}, Union{Nothing, Array{RenderPassRequirement, 1}}, Union{Nothing, Array{QueueType, 1}}, Union{Nothing, String}], [:name, :type, :render_pass_compatibility, :queue_compatibilty, :alias])
+    df = DataFrame([String, Union{Nothing, COMMAND_TYPE}, Union{Nothing, String}, Union{Nothing, Array{RenderPassRequirement, 1}}, Union{Nothing, Array{QueueType, 1}}, Union{Nothing, String}], [:name, :type, :return_type, :render_pass_compatibility, :queue_compatibilty, :alias])
     for node ∈ nodes
-        types = extract_type.(findall(".//param", node), include_pointer=false)
-        is_enum = any(is_struct_returnedonly(t) for t ∈ types)
         alias = getattr(node, "alias")
         name = !isnothing(alias) ? node["name"] : command_name(node)
+        types = extract_type.(findall("./param", node), include_pointer=false)
+        names = extract_identifier.(findall("./param", node))
+        is_enum = any(is_struct_returnedonly(t) for t ∈ types) || any(is_count_to_be_filled.(names, name))
         queues = queue_compatibility(node)
         rp_reqs = getattr(node, "renderpass")
         if !isnothing(rp_reqs)
@@ -133,7 +138,8 @@ function fetch_functions()
         end
         ctype = findfirst(startswith.(name, ["vkCreate", "vkDestroy", "vkAllocate", "vkFree", "vkCmd"]))
         ctype = is_enum ? ENUMERATE : isnothing(ctype) ? nothing : COMMAND_TYPE(ctype)
-        push!(df, (name, ctype, rp_reqs, queues, alias))
+        return_type = isnothing(alias) ? findfirst("./proto/type", node).content : nothing
+        push!(df, (name, ctype, return_type, rp_reqs, queues, alias))
     end
     df
 end
@@ -168,8 +174,22 @@ function fetch_destruction_info()
     df
 end
 
-vulkan_params = fetch_parameters()
-vulkan_fields = fetch_struct_fields()
+is_command(name) = startswith(name, "vk")
+is_struct(name) = startswith(name, "Vk")
+
+info_df(sname) = is_command(sname) ? grouped_vulkan_params : grouped_vulkan_fields
+info(name, sname) = dfmatch(info_df(sname)[(parent=sname,)], :name, name)
+
+is_count_to_be_filled(row) = !row.constant && row.param_requirement == POINTER_REQUIRED && row.type == "Ptr{uint32_t}"
+function is_count_to_be_filled(name, fname)
+    row = info(name, fname)
+    is_count_to_be_filled(row)
+end
+
+const vulkan_params = fetch_parameters()
+const vulkan_fields = fetch_struct_fields()
+const grouped_vulkan_fields = groupby(vulkan_fields, :parent)
+const grouped_vulkan_params = groupby(vulkan_params, :parent)
 const vulkan_structs = fetch_structs()
 const vulkan_functions = fetch_functions()
 const vulkan_types = fetch_types()
@@ -178,7 +198,7 @@ const vulkan_creation_info = fetch_creation_info()
 const vulkan_destruction_info = fetch_destruction_info()
 
 is_handle(type) = type ∈ (vulkan_handles.name..., "HANDLE")
-is_handle_with_create_info(type) = type ∈ vulkan_creation_info.name
+is_handle_with_create_info(type) = type ∈ vulkan_creation_info.name && !any(isempty.(getproperty.(dfmatches(vulkan_creation_info, :name, type), :create_info_structs)))
 is_handle_destructible(type) = type ∈ vulkan_destruction_info.name
 function is_handle_with_multiple_create_info(type)
     index = findall(vulkan_creation_info.name .== type)
@@ -188,7 +208,53 @@ end
 is_category(type, cat) = type ∈ (vulkan_types |> @filter(_.category == cat) |> DataFrame).name
 is_enum(type) = is_category(type, "enum")
 is_bitmask(type) = is_category(type, "bitmask")
-isalias(type) = !isnothing(vulkan_types[findfirst(x -> x == type, vulkan_types.name), :].alias)
+
+is_command_type(fname, val::COMMAND_TYPE) = dfmatch(vulkan_functions, :name, fname).type == val
+is_array_variable(name, sname) = !isnothing(info(name, sname).len)
+is_count_variable(name, sname) = !isempty(info(name, sname).arglen)
+
+"""
+    associated_array_variables(count_var_name, sname)
+
+# Examples
+```
+julia> associated_array_variables("enabledLayerCount", "VkInstanceCreateInfo")
+1-element Array{String,1}:
+ "ppEnabledLayerNames"
+```
+"""
+associated_array_variables(count_var_name, sname) = info(count_var_name, sname).arglen
+
+"""
+    associated_count_variable(array_var_name, sname)
+
+# Examples
+```
+julia> associated_count_variable("ppEnabledLayerNames", "VkInstanceCreateInfo")
+"enabledLayerCount"
+```
+"""
+associated_count_variable(array_var_name, sname) = info(array_var_name, sname).len
+function enumeration_command_count_variable(fname)
+    group = grouped_vulkan_params[(parent=fname,)]
+    index = findfirst(x -> is_count_to_be_filled(x, fname), group.name)
+    isnothing(index) && error("$fname has no count argument to be filled")
+    group[index, :]
+end
+
+function enumeration_command_array_variable(fname)
+    group = grouped_vulkan_params[(parent=fname,)]
+    arglen = first(enumeration_command_count_variable(fname).arglen)
+    group[findfirst(x -> x == arglen, group.name), :]
+end
+
+is_optional_parameter(name, sname) = name == "pNext" || info(name, sname).param_requirement ∈ [OPTIONAL, POINTER_OPTIONAL]
+
+function default(name, type)
+    (is_handle(type) || startswith(name, "p") || startswith(type, "Ptr{")) && return "C_NULL"
+    "0"
+end
+has_count_to_be_filled(fname) = any(is_count_to_be_filled(row) for row ∈ eachrow(grouped_vulkan_params[(parent=fname,)]))
 
 
 @assert is_handle("VkInstance")
@@ -206,3 +272,21 @@ isalias(type) = !isnothing(vulkan_types[findfirst(x -> x == type, vulkan_types.n
 @assert !is_bitmask("VkInstance")
 @assert is_enum("VkResult")
 @assert !is_enum("VkInstance")
+@assert isalias("VkAccelerationStructureNV")
+@assert !isalias("VkAccelerationStructureKHR")
+
+@assert is_array_variable("ppEnabledLayerNames", "VkInstanceCreateInfo")
+@assert !is_array_variable("enabledLayerCount", "VkInstanceCreateInfo")
+@assert !is_count_variable("ppEnabledLayerNames", "VkInstanceCreateInfo")
+@assert is_count_variable("enabledLayerCount", "VkInstanceCreateInfo")
+@assert associated_array_variables("enabledLayerCount", "VkInstanceCreateInfo") == ["ppEnabledLayerNames"]
+@assert associated_count_variable("ppEnabledLayerNames", "VkInstanceCreateInfo") == "enabledLayerCount"
+
+@assert default("ppEnabledLayerNames", "Ptr{Cstring}") == "C_NULL"
+@assert default("pApplicationInfo", "Ptr{VkApplicationInfo}") == "C_NULL"
+@assert default("device", "VkDevice") == "C_NULL"
+@assert default("enabledLayerCount", "UInt32") == "0"
+
+@assert is_count_to_be_filled("pPhysicalDeviceCount", "vkEnumeratePhysicalDevices")
+@assert enumeration_command_count_variable("vkEnumeratePhysicalDevices").name == "pPhysicalDeviceCount"
+@assert enumeration_command_array_variable("vkEnumeratePhysicalDevices").name == "pPhysicalDevices"

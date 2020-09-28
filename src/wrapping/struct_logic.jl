@@ -30,7 +30,7 @@ function structure(sdef)
     if is_handle(sname)
         new_fields["handle"] = sname
         abstract_type = "Handle"
-    elseif sname ∈ returnedonly_structs
+    elseif dfmatch(vulkan_structs, :name, sname).returnedonly
         abstract_type = "ReturnedOnly"
         for (name, type) ∈ sdef.fields
             drop_field(name, type, sname) && continue
@@ -121,7 +121,7 @@ function fieldtype_transform(name, type, sname = nothing)
     occursin("version", lowercase(name)) && type == "UInt32" && return Converted(type, "VersionNumber")
     is_ntuple(type) && inner_type(type) == "UInt8" && return Converted(type, "String")
     @return_value_if_key_exists type_conversions type
-    !isnothing(sname) && is_array_variable(name, sname) && return "Array{$(fieldtype_transform("", inner_type(type), sname))}"
+    !isnothing(sname) && !isempty(name) && is_array_variable(name, sname) && return "Array{$(fieldtype_transform("", inner_type(type), sname))}"
     is_vulkan_type(type) && return remove_vk_prefix(type)
     is_ptr(type) && return convert_nested_type(type)
     type

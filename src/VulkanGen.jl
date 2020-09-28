@@ -1,6 +1,6 @@
 module VulkanGen
 
-using Pipe, Transducers, DataStructures, JuliaFormatter, Parameters, EzXML, AbstractTrees, LightGraphs
+using Transducers, DataStructures, JuliaFormatter, Parameters, EzXML, AbstractTrees, LightGraphs
 using VulkanCore.vk
 using VulkanCore:vk
 using VulkanCore

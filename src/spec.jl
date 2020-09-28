@@ -9,9 +9,7 @@ xdoc = readxml(vk_xml)
 xroot = xdoc.root
 
 include("spec/utils.jl")
-include("spec/dataframes.jl")
 include("spec/aliases.jl")
-include("spec/structure_types.jl")
-include("spec/parameters.jl")
-include("spec/commands.jl")
+include("spec/dataframes.jl")
 include("spec/graph.jl")
+include("spec/structure_types.jl")

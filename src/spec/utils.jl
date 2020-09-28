@@ -13,14 +13,6 @@ function resolve_aliases!(collection::Dict, nodes)
     end
 end
 
-macro return_if_nothing(expr)
-    lhs = expr.args[1]
-    quote
-        $(esc(expr))
-        isnothing($(esc(lhs))) && return nothing
-    end
-end
-
 function extract_type(param; include_pointer=true)
     type = split(replace(param.content, "const " => ""))[1]
     type_nostar = rstrip(type, ['*', ' '])
@@ -46,3 +38,20 @@ function struct_name(node)
 end
 
 is_constant(node) = any(split(node.content) .== "const")
+
+equals(column, value) = x -> getproperty(x, column) == value
+
+function dfmatch(f, df)
+    index = findfirst(f, eachrow(df))
+    isnothing(index) && error("No match")
+    df[index, :]
+end
+
+dfmatch(df, column, value) = dfmatch(equals(column, value), df)
+function dfmatches(f, df)
+    indices = findall(f, eachrow(df))
+    isnothing(indices) && error("No match")
+    getindex.(Ref(df), indices, :)
+end
+
+dfmatches(df, column, value) = dfmatches(equals(column, value), df)

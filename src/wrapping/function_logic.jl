@@ -1,9 +1,9 @@
 function wrap!(w_api, fdef::FDefinition)
-    if is_enumeration_command(fdef.name)
+    if is_command_type(fdef.name, ENUMERATE)
         new_fdef = wrap_enumeration_command(typed_fdef(fdef))
     elseif startswith(fdef.name, "vkDestroy")
         return
-    elseif !is_creation_command(fdef)
+    elseif !is_command_type(fdef.name, CREATE)
         # name = name_transform(fdef)
         # body = statements(patterns(fdef))
         # new_fdef = FDefinition(name, Signature(name, args, kwargs), fdef.short, body)
@@ -33,14 +33,13 @@ function name_transform(str, ::Type{FDefinition})
     nc_convert(SnakeCaseLower, str[3:end])
 end
 
-is_creation_command(fdef) = startswith(fdef.name, "vkCreate")
-
 pass_new_nametype(::Type{FDefinition}) = (x, y, z) -> (arg = arg_transform(PositionalArgument(x, y)) ; (arg.name, arg.type))
 
 function wrap_enumeration_command(fdef)
     sig = fdef.signature
     fname = fdef.name
-    enumerated_type = last(enumeration_command_counts[fname].second)
+    !has_count_to_be_filled(fname) && return skip_wrap(fdef)
+    enumerated_type = remove_pointer(enumeration_command_array_variable(fname).type)
     args = arguments(sig)
     kwargs = keyword_arguments(sig)
     new_fname = name_transform(fdef)
@@ -59,7 +58,7 @@ function wrap_enumeration_command(fdef)
             push!(command_args, new_name)
         elseif is_ptr(type)
             transform = "pointer($new_name)"
-            push!(command_args, is_parameter(name, fname) ? "isnothing($new_name) ? $(optional_parameter_default_value(name, fname)) : $transform" : transform)
+            push!(command_args, is_parameter(name, fname) ? "isnothing($new_name) ? $(default(name, type)) : $transform" : transform)
         elseif is_parameter(name, fname)
             push!(command_args, new_name)
         end

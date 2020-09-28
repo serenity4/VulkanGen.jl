@@ -24,7 +24,7 @@ function adj_list()
             handle_info = vulkan_handles[findfirst(x -> x == name, vulkan_handles.name), :]
             !isnothing(handle_info.parent) && push!(adjl, Edge(i, findfirst(x -> x == handle_info.parent, vk_structs_graph)))
         else
-            types = remove_pointer.(vulkan_fields.type[findall(x -> x == name, vulkan_fields.struct)])
+            types = remove_pointer.(vulkan_fields.type[findall(x -> x == name, vulkan_fields.parent)])
             append!(adjl, Edge.(filter(!isnothing, indexin(unique(types), vk_structs_graph)), i))
         end
     end
