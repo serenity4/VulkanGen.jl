@@ -255,38 +255,3 @@ function default(name, type)
     "0"
 end
 has_count_to_be_filled(fname) = any(is_count_to_be_filled(row.name, fname) for row ∈ eachrow(grouped_vulkan_params[(parent=fname,)]))
-
-
-@assert is_handle("VkInstance")
-@assert !is_handle("VkInstanceCreateInfo")
-@assert is_handle_with_create_info("VkInstance")
-@assert !is_handle_with_create_info("VkPhysicalDevice")
-@assert is_handle_destructible("VkDevice")
-@assert !is_handle_destructible("VkPhysicalDevice")
-@assert is_handle_with_multiple_create_info("VkPipeline")
-@assert !is_handle_with_multiple_create_info("VkPhysicalDevice")
-@assert issubset(filter(!isalias, unique(vulkan_creation_info.name)), vulkan_handles.name)
-
-@assert is_bitmask("VkQueryPoolCreateFlags")
-@assert is_enum("VkDebugUtilsMessageSeverityFlagBitsEXT")
-@assert !is_bitmask("VkInstance")
-@assert is_enum("VkResult")
-@assert !is_enum("VkInstance")
-@assert isalias("VkAccelerationStructureNV")
-@assert !isalias("VkAccelerationStructureKHR")
-
-@assert is_array_variable("ppEnabledLayerNames", "VkInstanceCreateInfo")
-@assert !is_array_variable("enabledLayerCount", "VkInstanceCreateInfo")
-@assert !is_count_variable("ppEnabledLayerNames", "VkInstanceCreateInfo")
-@assert is_count_variable("enabledLayerCount", "VkInstanceCreateInfo")
-@assert associated_array_variables("enabledLayerCount", "VkInstanceCreateInfo") == ["ppEnabledLayerNames"]
-@assert associated_count_variable("ppEnabledLayerNames", "VkInstanceCreateInfo") == "enabledLayerCount"
-
-@assert default("ppEnabledLayerNames", "Ptr{Cstring}") == "C_NULL"
-@assert default("pApplicationInfo", "Ptr{VkApplicationInfo}") == "C_NULL"
-@assert default("device", "VkDevice") == "C_NULL"
-@assert default("enabledLayerCount", "UInt32") == "0"
-
-@assert is_count_to_be_filled("pPhysicalDeviceCount", "vkEnumeratePhysicalDevices")
-@assert enumeration_command_count_variable("vkEnumeratePhysicalDevices").name == "pPhysicalDeviceCount"
-@assert enumeration_command_array_variable("vkEnumeratePhysicalDevices").name == "pPhysicalDevices"

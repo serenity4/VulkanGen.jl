@@ -15,7 +15,7 @@ cdef2 = CDefinition("c2", "[1, 2, 3, 4, 5, 6, 7, 8, 9, 10]")
 edef1 = EDefinition(name="e1", fields=["a", "b", "c", "d"])
 edef2 = EDefinition(name="e1", fields=["a", "b", "c", "d"], with_begin_block=true, enum_macro="@enum")
 
-@testset "Definitions" begin
+@testset "Code generation" begin
     @testset "Structure definition" begin
         @test generate(sdef1) == format_text("struct sdef1 end")
         @test generate(sdef2) == format_text("mutable struct sdef2 end")
@@ -27,10 +27,10 @@ edef2 = EDefinition(name="e1", fields=["a", "b", "c", "d"], with_begin_block=tru
     end
 
     @testset "Function definition" begin
-        @test generate(fdef1) == format_text("function replace(a::Union{Function, Type}, b::Pair; count=nothing) end")
-        @test generate(fdef2) == format_text("function replace(a::Union{Function, Type}, b::Pair; count=nothing) a=5 end")
+        @test generate(fdef1) == format_text("function replace(a::Union{Function, Type}, b::Pair; count) end")
+        @test generate(fdef2) == format_text("function replace(a::Union{Function, Type}, b::Pair; count) a=5 end")
         @test generate(fdef3) == format_text("""
-                         function replace(a::Union{Function, Type}, b::Pair; count=nothing)
+                         function replace(a::Union{Function, Type}, b::Pair; count)
                              i = 1
                              i += 1
                              nothing
