@@ -197,7 +197,7 @@ const vulkan_handles = fetch_handles()
 const vulkan_creation_info = fetch_creation_info()
 const vulkan_destruction_info = fetch_destruction_info()
 
-is_handle(type) = type ∈ (vulkan_handles.name..., "HANDLE")
+is_handle(type) = follow_alias(type) ∈ (vulkan_handles.name..., "HANDLE")
 is_handle_with_create_info(type) = type ∈ vulkan_creation_info.name && !any(isempty.(getproperty.(dfmatches(vulkan_creation_info, :name, type), :create_info_structs)))
 is_handle_destructible(type) = type ∈ vulkan_destruction_info.name
 function is_handle_with_multiple_create_info(type)
