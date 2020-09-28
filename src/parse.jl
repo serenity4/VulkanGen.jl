@@ -58,7 +58,7 @@ function parse_for_definition(file, ::Type{T}) where {T <: Declaration}
             lines = detect_definition(io, T)
             if !isnothing(lines)
                 decl = T(join(lines, "\n"))
-                !(decl isa FDefinition && last(decl.signature.args).name == "fun_ptr") ? push!(defs, decl) : nothing
+                !(decl isa FDefinition && last(decl.signature.args).name == "fun_ptr") && !isalias(decl.name) ? push!(defs, decl) : nothing
             end
         end
     end
@@ -67,7 +67,7 @@ end
 
 function convert_constptr_to_struct!(api)
     for cdef ∈ values(api.consts)
-        if is_opaque(api.eval(cdef.value)) && !startswith(cdef.name, "PFN") # ignore function pointers
+        if is_opaque(api.eval(cdef.value)) && !startswith(cdef.name, "PFN") && !isalias(cdef.name) # ignore function pointers
             sdef = parse_ptr(cdef.name)
             api.structs[sdef.name] = sdef
         end
