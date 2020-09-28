@@ -38,7 +38,7 @@ pass_new_nametype(::Type{FDefinition}) = (x, y, z) -> (arg = arg_transform(Posit
 function wrap_enumeration_command(fdef)
     sig = fdef.signature
     fname = fdef.name
-    !has_count_to_be_filled(fname) && return skip_wrap(fdef)
+    !has_count_to_be_filled(fname) && return wrap_generic(fdef)
     enumerated_type = remove_pointer(enumeration_command_array_variable(fname).type)
     args = arguments(sig)
     kwargs = keyword_arguments(sig)
@@ -93,7 +93,7 @@ checked_function_call(fdef) = (fdef.return_type == "VkResult" ? "@check " : "") 
 
 function wrap_generic(fdef)
     sig = fdef.signature
-    args, kwargs = arguments(sig, transform_name=true), keyword_arguments(sig, transform_name=false)
+    args, kwargs = arguments(sig, transform_name=true), keyword_arguments(sig, transform_name=true)
     new_fname = name_transform(fdef.name, FDefinition)
     new_sig = Signature(new_fname, args, kwargs)
     # body = [Statement("$(sig.name)($(join_args(argnames(new_sig))))")]

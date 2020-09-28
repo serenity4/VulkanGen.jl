@@ -16,6 +16,12 @@ function constructor(new_sdef, sdef)
         push!(defs, constructor(new_sdef, sdef, CreateVkHandle()))
         push!(defs, constructor(new_sdef, sdef, CreateVkHandle(), add_fun_ptr=true))
         # push!(defs, constructor(new_sdef, sdef, CreateVkHandleWithCreateInfo()))
+    elseif !is_handle(sname) && dfmatch(vulkan_structs, :name, sname).returnedonly
+        vk_sig = Signature(sdef)
+        args_undropped = [name for (name, type) ∈ zip(argnames(vk_sig), argtypes(vk_sig)) if !drop_field(name, type, sname)]
+        body = [Statement("$(new_sdef.name)($(join_args("from_vk(" .* argtypes(Signature(new_sdef)) .* ", vks." .* args_undropped .* ")")))")]
+        fdef = FDefinition(new_sdef.name, Signature(new_sdef.name, [PositionalArgument("vks", sname)], KeywordArgument[]), true, body)
+        push!(defs, fdef) 
     elseif !is_handle(sname)
         if keeps_original_layout(sdef)
             push!(defs, constructor(new_sdef, sdef, GenericConstructor(), is_inner_constructor=false, add_type_annotations=false))
@@ -32,12 +38,6 @@ function constructor(new_sdef, sdef)
         #         push!(defs, constructor(new_sdef, sdef, GenericConstructor()))
         #     end
         # end
-    elseif !is_handle(sname) && dfmatch(vulkan_structs, :name, sname).returnedonly
-        vk_sig = Signature(sdef)
-        args_undropped = [name for (name, type) ∈ zip(argnames(vk_sig), argtypes(vk_sig)) if !drop_field(name, type, sname)]
-        body = [Statement("$(new_sdef.name)($(join_args("from_vk(" .* argtypes(Signature(new_sdef)) .* ", vks." .* args_undropped .* ")")))")]
-        fdef = FDefinition(new_sdef.name, Signature(new_sdef.name, [PositionalArgument("vks", sname)], KeywordArgument[]), true, body)
-        push!(defs, fdef) 
     end
     defs
 end

@@ -180,10 +180,10 @@ is_struct(name) = startswith(name, "Vk")
 info_df(sname) = is_command(sname) ? grouped_vulkan_params : grouped_vulkan_fields
 info(name, sname) = dfmatch(info_df(sname)[(parent=sname,)], :name, name)
 
-is_count_to_be_filled(row) = !row.constant && row.param_requirement == POINTER_REQUIRED && row.type == "Ptr{uint32_t}"
 function is_count_to_be_filled(name, fname)
+    group = info_df(fname)[(parent=fname,)]
     row = info(name, fname)
-    is_count_to_be_filled(row)
+    !row.constant && row.param_requirement == POINTER_REQUIRED && any(name .== group.len)
 end
 
 const vulkan_params = fetch_parameters()
@@ -254,7 +254,7 @@ function default(name, type)
     (is_handle(type) || startswith(name, "p") || startswith(type, "Ptr{")) && return "C_NULL"
     "0"
 end
-has_count_to_be_filled(fname) = any(is_count_to_be_filled(row) for row ∈ eachrow(grouped_vulkan_params[(parent=fname,)]))
+has_count_to_be_filled(fname) = any(is_count_to_be_filled(row.name, fname) for row ∈ eachrow(grouped_vulkan_params[(parent=fname,)]))
 
 
 @assert is_handle("VkInstance")

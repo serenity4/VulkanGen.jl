@@ -1,4 +1,5 @@
 using VulkanGen
+const vg = VulkanGen
 
 getfile(name) = dirname(dirname(pathof(VulkanCore))) *  "/gen/" * name
 files = getfile.(["vk_common.jl", "vk_api.jl"])

@@ -36,11 +36,11 @@ check_acyclic(g) = !is_cyclic(g) || error("Cycles: $(getindex.(Ref(vk_structs_gr
 
 adj = adj_list()
 
-g = SimpleDiGraph(adj)
+deps_g = SimpleDiGraph(adj)
 
 # add verts to fill the graph with isolated types (avoid bound errors for isolated types)
-nv(g) < length(vk_structs_graph) && add_vertices!(g, length(vk_structs_graph) - nv(g))
-check_acyclic(g)
+nv(deps_g) < length(vk_structs_graph) && add_vertices!(deps_g, length(vk_structs_graph) - nv(deps_g))
+check_acyclic(deps_g)
 
 macro check_in_graph(type) :($(esc(type)) ∉ vk_structs_graph && error(string($(esc(type))) * " not in graph")) end
 
@@ -74,7 +74,7 @@ true
 function depends_on(a, b)
     @graph_index a
     @graph_index b
-    a ∈ inneighbors(g, b)
+    a ∈ inneighbors(deps_g, b)
 end
 
 
@@ -92,7 +92,7 @@ julia> vk_dependencies("VkPhysicalDeviceProperties")
 """
 function vk_dependencies(a)
     @graph_index a
-    getindex.(Ref(vk_structs_graph), inneighbors(g, a))
+    getindex.(Ref(vk_structs_graph), inneighbors(deps_g, a))
 end
 
 @assert vk_dependencies("VkPhysicalDeviceProperties") == ["VkPhysicalDeviceSparseProperties", "VkPhysicalDeviceLimits"]

@@ -6,13 +6,13 @@ function fetch_aliases(xroot)
 end
 
 function build_alias_graph(alias_verts, aliases_dict)
-    g = SimpleDiGraph(length(alias_verts))
+    aliases_g = SimpleDiGraph(length(alias_verts))
 
     for (j, (src, dst)) ∈ enumerate(aliases_dict)
         i = findfirst(dst .== alias_verts)
-        add_edge!(g, i, j)
+        add_edge!(aliases_g, i, j)
     end
-    g
+    aliases_g
 end
 
 const aliases_dict = fetch_aliases(xroot)
@@ -30,15 +30,15 @@ hasalias(name) = name ∈ values(aliases_dict)
 
 alias_verts = unique(vcat(keys(aliases_dict)..., values(aliases_dict)...))
 
-g = build_alias_graph(alias_verts, aliases_dict)
+aliases_g = build_alias_graph(alias_verts, aliases_dict)
 
-aliases(g::SimpleDiGraph, index) = getindex.(Ref(alias_verts), outneighbors(g, index))
-aliases(name) = (index = findfirst(alias_verts .== name); isnothing(index) ? String[] : aliases(g, index))
+aliases(aliases_g::SimpleDiGraph, index) = getindex.(Ref(alias_verts), outneighbors(aliases_g, index))
+aliases(name) = (index = findfirst(alias_verts .== name); isnothing(index) ? String[] : aliases(aliases_g, index))
 
-follow_alias(g::SimpleDiGraph, index) = (indices = inneighbors(g, index); isempty(indices) ? alias_verts[index] : length(indices) > 1 ? error("More than one indices returned for $(alias_verts[index]) when following alias $(getindex.(Ref(alias_verts), indices))") : alias_verts[first(indices)])
-follow_alias(name) = (index = findfirst(alias_verts .== name); isnothing(index) ? name : follow_alias(g, index))
+follow_alias(aliases_g::SimpleDiGraph, index) = (indices = inneighbors(aliases_g, index); isempty(indices) ? alias_verts[index] : length(indices) > 1 ? error("More than one indices returned for $(alias_verts[index]) when following alias $(getindex.(Ref(alias_verts), indices))") : alias_verts[first(indices)])
+follow_alias(name) = (index = findfirst(alias_verts .== name); isnothing(index) ? name : follow_alias(aliases_g, index))
 
-# for el ∈ topological_sort_by_dfs(g)
+# for el ∈ topological_sort_by_dfs(aliases_g)
 #     elname = alias_verts[el]
 #     println("$(lpad("$elname ($el)", 120)) => $(isalias(elname) ? "ALIAS" : "NOALIAS")")
 # end
